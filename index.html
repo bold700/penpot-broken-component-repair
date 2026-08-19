@@ -366,7 +366,7 @@
 
   function renderDiagnostics(diagnostics, scope) {
     const rows = [
-      ["Scope", scope === "file" ? "Whole file" : "Current page"],
+      ["Scope", scope === "file" ? "Hele bestand" : "Huidige pagina"],
       ["Pages scanned", String(diagnostics.pages)],
       ["Shapes inspected", String(diagnostics.shapes)],
       ["Component copies", String(diagnostics.copyInstances)],
@@ -374,6 +374,9 @@
       ["Libraries indexed", String(diagnostics.libraries)],
       ["Library components indexed", String(diagnostics.components)],
     ];
+    if (diagnostics.errors && diagnostics.errors.length) {
+      rows.push(["Overgeslagen door fouten", diagnostics.errors.join(" | ")]);
+    }
 
     diagnosticsList.innerHTML = "";
     for (const [term, value] of rows) {
@@ -429,11 +432,44 @@
     setStatus("Scope changed. Scan again to refresh the list.");
   });
 
+  let connected = false;
+
+  function describeProbe(probe, notes) {
+    const rows = [
+      ["Sandbox", "verbonden"],
+      ["Huidige pagina", probe.currentPage ? "ja" : "nee"],
+      ["Bestand leesbaar", probe.currentFile ? `ja, ${probe.pages} pagina(s)` : "nee"],
+      ["findShapes()", probe.findShapes ? "werkt" : "faalt"],
+      ["isComponentCopyInstance()", probe.isComponentCopyInstance ? "aanwezig" : "niet gevonden"],
+      ["swapComponent()", probe.swapComponent ? "aanwezig" : "niet gevonden"],
+      ["Undo-blokken", probe.history ? "aanwezig" : "niet gevonden"],
+      ["Lokale componenten", String(probe.localComponents)],
+      ["Verbonden libraries", String(probe.connectedLibraries)],
+    ];
+    if (notes && notes.length) rows.push(["Fouten", notes.join(" | ")]);
+
+    diagnosticsList.innerHTML = "";
+    for (const [term, value] of rows) {
+      const dt = document.createElement("dt");
+      dt.textContent = term;
+      const dd = document.createElement("dd");
+      dd.textContent = value;
+      diagnosticsList.append(dt, dd);
+    }
+  }
+
   window.addEventListener("message", event => {
     const message = event.data;
     if (!message || typeof message !== "object" || !("type" in message)) return;
+    connected = true;
 
     switch (message.type) {
+      case "hello":
+        applyTheme(message.theme);
+        describeProbe(message.probe, message.notes);
+        setStatus("Verbonden met Penpot. Klik Scan.", "ok");
+        return;
+
       case "theme":
         applyTheme(message.theme);
         return;
@@ -467,7 +503,15 @@
 
   applyTheme(new URLSearchParams(window.location.search).get("theme") || "light");
   send({ type: "ready" });
-  setStatus("Ready. Press Scan to look for broken component links.");
+  setStatus("Verbinden met Penpot…", "", true);
+
+  // If plugin.js never answers, the sandbox failed to load. Say so instead of
+  // leaving a panel that looks fine but does nothing.
+  setTimeout(() => {
+    if (connected) return;
+    setStatus("Geen verbinding met de Penpot sandbox. plugin.js is niet geladen of crashte bij het starten.", "error");
+    scanButton.disabled = true;
+  }, 2500);
   </script>
 </body>
 </html>

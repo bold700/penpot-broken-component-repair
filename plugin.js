@@ -92,20 +92,40 @@ function scan(scope) {
     mainInstances: 0,
     libraries: index.libraryCount,
     components: index.components,
+    errors: [],
   };
 
   shapeCache.clear();
 
   for (const page of pages) {
-    for (const shape of page.findShapes()) {
+    let shapes = [];
+    try {
+      shapes = page.findShapes();
+    } catch (e) {
+      diagnostics.errors.push('findShapes on "' + page.name + '": ' + e.message);
+      continue;
+    }
+
+    for (const shape of shapes) {
       diagnostics.shapes++;
 
-      if (shape.isComponentMainInstance()) {
+      // A single odd shape must not take the whole scan down with it.
+      let isMain = false;
+      let isCopy = false;
+      try {
+        isMain = shape.isComponentMainInstance();
+        isCopy = shape.isComponentCopyInstance();
+      } catch (e) {
+        diagnostics.errors.push('shape "' + shape.name + '": ' + e.message);
+        continue;
+      }
+
+      if (isMain) {
         diagnostics.mainInstances++;
         continue;
       }
 
-      if (!shape.isComponentCopyInstance()) continue;
+      if (!isCopy) continue;
       diagnostics.copyInstances++;
 
       const component = resolveComponent(shape);
@@ -226,16 +246,57 @@ penpot.ui.open('Broken Component Repair', `?theme=${penpot.theme}`, {
   height: 700,
 });
 
-penpot.on('themechange', theme => {
-  penpot.ui.sendMessage({ type: 'theme', theme });
-});
+try {
+  penpot.on('themechange', theme => {
+    penpot.ui.sendMessage({ type: 'theme', theme });
+  });
+} catch (e) {
+  // Older Penpot builds may not know this event. Not worth failing over.
+}
+
+/** Tells the UI the sandbox is alive and what this Penpot can do. */
+function hello() {
+  const probe = {
+    currentPage: !!penpot.currentPage,
+    currentFile: !!penpot.currentFile,
+    pages: 0,
+    localComponents: 0,
+    connectedLibraries: 0,
+    findShapes: false,
+    isComponentCopyInstance: false,
+    swapComponent: false,
+    history: !!(penpot.history && typeof penpot.history.undoBlockBegin === 'function'),
+  };
+  const notes = [];
+
+  try {
+    probe.pages = penpot.currentFile ? penpot.currentFile.pages.length : 0;
+  } catch (e) { notes.push('pages: ' + e.message); }
+
+  try {
+    probe.localComponents = penpot.library.local.components.length;
+    probe.connectedLibraries = penpot.library.connected.length;
+  } catch (e) { notes.push('library: ' + e.message); }
+
+  try {
+    const shapes = penpot.currentPage ? penpot.currentPage.findShapes() : [];
+    probe.findShapes = true;
+    const sample = shapes[0];
+    if (sample) {
+      probe.isComponentCopyInstance = typeof sample.isComponentCopyInstance === 'function';
+      probe.swapComponent = typeof sample.swapComponent === 'function';
+    }
+  } catch (e) { notes.push('findShapes: ' + e.message); }
+
+  penpot.ui.sendMessage({ type: 'hello', theme: penpot.theme, probe, notes });
+}
 
 penpot.ui.onMessage(msg => {
   try {
     if (!msg || !msg.type) return;
 
     if (msg.type === 'ready') {
-      penpot.ui.sendMessage({ type: 'theme', theme: penpot.theme });
+      hello();
       return;
     }
 

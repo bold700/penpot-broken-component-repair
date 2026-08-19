@@ -228,15 +228,45 @@ check("returns a fresh scan with the result", () => {
   assert.equal(repaired.scan.type, "scan-result");
 });
 
+console.log("\nhandshake");
+{
+  const before = sent.length;
+  onMessage({ type: "ready" });
+  const hello = sent.slice(before).find((message) => message.type === "hello");
+  check("ready gets answered with a probe", () => {
+    assert.ok(hello);
+    assert.equal(hello.probe.currentFile, true);
+    assert.equal(hello.probe.pages, 2);
+    assert.equal(hello.probe.connectedLibraries, 2);
+    assert.equal(hello.probe.swapComponent, true);
+    assert.equal(hello.probe.history, true);
+  });
+}
+
+console.log("\nresilience");
+{
+  const exploding = makeShape({ id: "s-boom", name: "Boom", copy: true });
+  exploding.isComponentCopyInstance = () => { throw new Error("shape exploded"); };
+  const originalFind = pageTwo.findShapes;
+  pageTwo.findShapes = () => [exploding, shapes.unknown];
+
+  onMessage({ type: "scan", scope: "file" });
+  const result = last("scan-result");
+  check("a shape that throws is skipped, the rest still scans", () => {
+    assert.ok(result.diagnostics.errors.some((e) => e.includes("shape exploded")));
+    assert.ok(result.items.some((item) => item.id === "s-unknown"));
+  });
+  pageTwo.findShapes = originalFind;
+}
+
 console.log("\nerror handling");
-const before = sent.length;
 globalThis.penpot.currentFile = null;
 globalThis.penpot.currentPage = { id: "boom", name: "Boom", findShapes: () => { throw new Error("page exploded"); } };
 onMessage({ type: "scan", scope: "file" });
-check("an API error is reported instead of crashing the sandbox", () => {
-  const error = sent.slice(before).find((message) => message.type === "error");
-  assert.ok(error);
-  assert.equal(error.message, "page exploded");
+check("a page that cannot be read is reported, not crashed on", () => {
+  const result = last("scan-result");
+  assert.deepEqual(result.diagnostics.errors, ['findShapes on "Boom": page exploded']);
+  assert.equal(result.items.length, 0);
 });
 
 console.log(failures === 0 ? "\nAll checks passed.\n" : `\n${failures} check(s) failed.\n`);
