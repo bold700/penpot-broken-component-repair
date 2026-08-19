@@ -59,6 +59,7 @@ function buildLibraryIndex() {
       const variant = variantInfo(component);
       match.isVariant = !!variant;
       match.variantProps = variant ? variant.props : null;
+      match.variantProperties = variant ? readVariantProperties(component) : null;
       match.containerName = variant ? lastPathSegment(component.path || '') : '';
 
       componentCache.set(key, component);
@@ -226,6 +227,23 @@ function variantInfo(component) {
   }
 }
 
+/** Every variant property with all values it can take, e.g. Type: [A, B, C, D]. */
+function readVariantProperties(component) {
+  try {
+    const variants = component.variants;
+    if (!variants) return null;
+
+    const names = variants.properties || [];
+    const properties = names.map(name => ({
+      name,
+      values: variants.currentValues(name) || [],
+    }));
+    return properties.length ? properties : null;
+  } catch (e) {
+    return null;
+  }
+}
+
 function lastPathSegment(path) {
   const parts = String(path || '').split('/').filter(Boolean);
   return parts.length ? parts[parts.length - 1] : '';
@@ -245,10 +263,10 @@ function readVariantProps(shape, component) {
  * variant we matched, switchVariant walks it to the right one per property.
  */
 function restoreVariant(shape, component, wanted) {
-  if (!wanted) return null;
+  if (!wanted || Object.keys(wanted).length === 0) return null;
 
   const info = variantInfo(component);
-  if (!info || !info.props) return null;
+  if (!info) return null;
 
   let names = [];
   try {
@@ -256,13 +274,23 @@ function restoreVariant(shape, component, wanted) {
   } catch (e) {
     return null;
   }
+  if (names.length === 0) return null;
 
+  const current = info.props || {};
   const applied = [];
   const failed = [];
+
   for (const property of Object.keys(wanted)) {
     const pos = names.indexOf(property);
-    if (pos < 0) continue;
-    if (info.props[property] === wanted[property]) continue;
+    if (pos < 0) {
+      failed.push(property + ': onbekende variant-eigenschap');
+      continue;
+    }
+    // Already on it after the swap, nothing to do.
+    if (current[property] === wanted[property]) {
+      applied.push(property + '=' + wanted[property]);
+      continue;
+    }
 
     try {
       shape.switchVariant(pos, wanted[property]);
@@ -382,7 +410,12 @@ function repair(request) {
         // Everything the user owns is read before the swap and put back after,
         // because a swap rewrites the layer name and can resize the copy.
         const before = captureShape(shape);
-        const wantedVariant = readVariantProps(shape, resolveComponent(shape));
+        // What the user picked in the panel wins. Only when nothing was picked
+        // do we fall back to what could be read off the broken copy.
+        const chosenVariant = (request.variants || {})[shapeId];
+        const wantedVariant = (chosenVariant && Object.keys(chosenVariant).length)
+          ? chosenVariant
+          : readVariantProps(shape, resolveComponent(shape));
 
         shape.swapComponent(component);
 

@@ -157,6 +157,10 @@
       min-width: 0;
     }
 
+    .variants { display: grid; gap: 4px; padding-left: 12px; border-left: 2px solid var(--line); }
+    .variants .choice select { font-size: 12px; }
+    .warn { color: var(--warn); }
+
     .empty { padding: 24px 4px; text-align: center; }
     .empty h2 { font-size: 13px; margin: 0 0 4px; letter-spacing: -0.01em; }
     .empty p { color: var(--muted); font-size: 12px; margin: 0 auto 12px; max-width: 40ch; }
@@ -183,41 +187,41 @@
 <body>
   <h1>Broken Component Repair</h1>
   <p class="sub">
-    Finds component copies whose library reference is missing, then relinks them to a component with the
-    same name using Penpot's component swap, so overrides survive where Penpot can keep them.
+    Zoekt component-copies waarvan de library-verwijzing weg is en koppelt ze opnieuw aan een component
+    met dezelfde naam, via Penpots eigen component-swap. Je laagnaam, formaat en variant blijven staan.
   </p>
 
   <div class="toolbar">
-    <button id="scan" type="button">Scan</button>
-    <button id="repair" type="button" disabled>Repair selected</button>
-    <button id="close" type="button" class="secondary">Close</button>
+    <button id="scan" type="button">Scannen</button>
+    <button id="repair" type="button" disabled>Herstel selectie</button>
+    <button id="close" type="button" class="secondary">Sluiten</button>
 
     <div class="scope">
-      <label for="scope">Scope</label>
+      <label for="scope">Bereik</label>
       <select id="scope">
-        <option value="file">Whole file</option>
-        <option value="page">Current page</option>
+        <option value="file">Hele bestand</option>
+        <option value="page">Huidige pagina</option>
       </select>
     </div>
   </div>
 
   <div class="summary">
-    <div class="stat"><b id="brokenCount">0</b><span>broken</span></div>
-    <div class="stat"><b id="repairableCount">0</b><span>repairable</span></div>
-    <div class="stat"><b id="ambiguousCount">0</b><span>needs a choice</span></div>
-    <div class="stat"><b id="unresolvedCount">0</b><span>no match</span></div>
+    <div class="stat"><b id="brokenCount">0</b><span>kapot</span></div>
+    <div class="stat"><b id="repairableCount">0</b><span>te herstellen</span></div>
+    <div class="stat"><b id="ambiguousCount">0</b><span>keuze nodig</span></div>
+    <div class="stat"><b id="unresolvedCount">0</b><span>geen match</span></div>
   </div>
 
-  <div id="status" role="status" aria-live="polite">Ready.</div>
+  <div id="status" role="status" aria-live="polite">Gereed.</div>
 
   <div id="lastRepair"></div>
 
   <div id="results"></div>
 
   <details class="diag">
-    <summary>Scan diagnostics</summary>
+    <summary>Diagnose</summary>
     <dl id="diagnostics">
-      <dt>Not scanned yet</dt><dd>&nbsp;</dd>
+      <dt>Nog niet gescand</dt><dd>&nbsp;</dd>
     </dl>
   </details>
 
@@ -242,6 +246,8 @@
 
   /** shape id -> chosen library component key */
   const choices = new Map();
+  /** shape id -> { variantProperty: value } */
+  const variantChoices = new Map();
   let lastScan = null;
 
   function send(message) {
@@ -264,21 +270,21 @@
   }
 
   function label(match) {
-    const library = match.isLocal ? "Local library" : match.libraryName;
+    const library = match.isLocal ? "Lokale library" : match.libraryName;
     return `${library} · ${match.fullName}`;
   }
 
   function reasonText(item) {
     return item.reason === "no-component"
-      ? "No component reference could be read"
-      : "References a component that is not in any connected library";
+      ? "Componentverwijzing niet meer leesbaar, daarom gezocht op laagnaam"
+      : "Verwijst naar een component in een library die niet meer verbonden is";
   }
 
   function updateRepairButton() {
     repairButton.disabled = choices.size === 0;
     repairButton.textContent = choices.size
-      ? `Repair ${choices.size} selected`
-      : "Repair selected";
+      ? `Herstel ${choices.size} geselecteerd`
+      : "Herstel selectie";
   }
 
   function buildItem(item) {
@@ -292,28 +298,28 @@
     name.type = "button";
     name.className = "item-name";
     name.textContent = item.shapeName || "(unnamed)";
-    name.title = "Select this shape on the canvas";
+    name.title = "Selecteer deze shape op het canvas";
     name.addEventListener("click", () => send({ type: "select", id: item.id }));
 
     const badge = document.createElement("span");
     badge.className = `badge ${item.status}`;
     badge.textContent =
-      item.status === "repairable" ? "match found"
+      item.status === "repairable" ? "match gevonden"
       : item.status === "ambiguous" ? `${item.matches.length} matches`
-      : "no match";
+      : "geen match";
 
     head.append(name, badge);
 
     const meta = document.createElement("div");
     meta.className = "meta";
-    meta.textContent = `${item.pageName} · looked up as "${item.lookupName}" · ${reasonText(item)}`;
+    meta.textContent = `${item.pageName} · gezocht op "${item.lookupName}" · ${reasonText(item)}`;
 
     row.append(head, meta);
 
     if (item.matches.length === 0) {
       const hint = document.createElement("div");
       hint.className = "meta";
-      hint.textContent = "No component with this name exists in the local or connected libraries.";
+      hint.textContent = "Geen component met deze naam in de lokale of verbonden libraries.";
       row.append(hint);
       return row;
     }
@@ -326,7 +332,7 @@
 
     const skip = document.createElement("option");
     skip.value = "";
-    skip.textContent = "Leave untouched";
+    skip.textContent = "Niet aanraken";
     select.append(skip);
 
     for (const match of item.matches) {
@@ -343,19 +349,86 @@
       choices.set(item.id, item.matches[0].key);
     }
 
+    const variantBox = document.createElement("div");
+    variantBox.className = "variants";
+
+    // A variant container is one entry in the list above. Which of its variants
+    // the copy was on cannot be read off a broken link, so it is picked here.
+    function renderVariantPickers() {
+      variantBox.innerHTML = "";
+      variantChoices.delete(item.id);
+
+      const match = item.matches.find(candidate => candidate.key === select.value);
+      if (!match || !match.variantProperties) return;
+
+      const detected = item.variantProps || {};
+      const chosen = {};
+
+      for (const property of match.variantProperties) {
+        const row = document.createElement("div");
+        row.className = "choice";
+
+        const picker = document.createElement("select");
+        picker.id = `variant-${item.id}-${property.name}`;
+
+        const unknown = document.createElement("option");
+        unknown.value = "";
+        unknown.textContent = "eerste variant";
+        picker.append(unknown);
+
+        for (const value of property.values) {
+          const option = document.createElement("option");
+          option.value = value;
+          option.textContent = value;
+          picker.append(option);
+        }
+
+        if (detected[property.name] && property.values.includes(detected[property.name])) {
+          picker.value = detected[property.name];
+          chosen[property.name] = detected[property.name];
+        }
+
+        picker.addEventListener("change", () => {
+          if (picker.value) chosen[property.name] = picker.value;
+          else delete chosen[property.name];
+          if (Object.keys(chosen).length) variantChoices.set(item.id, chosen);
+          else variantChoices.delete(item.id);
+          warn.hidden = Object.keys(chosen).length > 0;
+        });
+
+        const pickerLabel = document.createElement("label");
+        pickerLabel.className = "meta";
+        pickerLabel.htmlFor = picker.id;
+        pickerLabel.textContent = property.name;
+
+        row.append(pickerLabel, picker);
+        variantBox.append(row);
+      }
+
+      const warn = document.createElement("div");
+      warn.className = "meta warn";
+      warn.textContent = "Variant niet af te leiden uit de kapotte copy. Kies hem, anders wordt het de eerste.";
+      warn.hidden = Object.keys(chosen).length > 0;
+      variantBox.append(warn);
+
+      if (Object.keys(chosen).length) variantChoices.set(item.id, chosen);
+    }
+
     select.addEventListener("change", () => {
       if (select.value) choices.set(item.id, select.value);
       else choices.delete(item.id);
+      renderVariantPickers();
       updateRepairButton();
     });
 
     const selectLabel = document.createElement("label");
     selectLabel.className = "meta";
     selectLabel.htmlFor = select.id;
-    selectLabel.textContent = "Relink to";
+    selectLabel.textContent = "Koppel aan";
 
     choice.append(selectLabel, select);
-    row.append(choice);
+    row.append(choice, variantBox);
+    renderVariantPickers();
     return row;
   }
 
@@ -364,17 +437,17 @@
     empty.className = "empty";
 
     const title = document.createElement("h2");
-    title.textContent = "No broken component links found";
+    title.textContent = "Geen kapotte component-links gevonden";
 
     const body = document.createElement("p");
     body.textContent = scan.diagnostics.copyInstances === 0
-      ? `Scanned ${scan.diagnostics.shapes} shapes across ${scan.diagnostics.pages} page(s) and found no component copies at all. Check the scope, or open the diagnostics below.`
-      : `All ${scan.diagnostics.copyInstances} component copies resolve to a component in the local or a connected library.`;
+      ? `${scan.diagnostics.shapes} shapes op ${scan.diagnostics.pages} pagina('s) bekeken en geen enkele component-copy gevonden. Controleer het bereik, of klap de diagnose hieronder open.`
+      : `Alle ${scan.diagnostics.copyInstances} component-copies verwijzen naar een component in de lokale of een verbonden library.`;
 
     const again = document.createElement("button");
     again.type = "button";
     again.className = "secondary";
-    again.textContent = "Scan again";
+    again.textContent = "Opnieuw scannen";
     again.addEventListener("click", () => startScan());
 
     empty.append(title, body, again);
@@ -384,13 +457,13 @@
   function renderDiagnostics(diagnostics, scope) {
     const rows = [
       ["Scope", scope === "file" ? "Hele bestand" : "Huidige pagina"],
-      ["Pages scanned", String(diagnostics.pages)],
-      ["Shapes inspected", String(diagnostics.shapes)],
-      ["Component copies", String(diagnostics.copyInstances)],
-      ["Main components on canvas", String(diagnostics.mainInstances)],
-      ["Libraries indexed", String(diagnostics.libraries)],
-      ["Library components indexed", String(diagnostics.components)],
-      ["Variant containers", String(diagnostics.variants ?? 0)],
+      ["Pagina's gescand", String(diagnostics.pages)],
+      ["Shapes bekeken", String(diagnostics.shapes)],
+      ["Component-copies", String(diagnostics.copyInstances)],
+      ["Main components op canvas", String(diagnostics.mainInstances)],
+      ["Libraries geïndexeerd", String(diagnostics.libraries)],
+      ["Library-componenten", String(diagnostics.components)],
+      ["Variant-containers", String(diagnostics.variants ?? 0)],
     ];
     if (diagnostics.errors && diagnostics.errors.length) {
       rows.push(["Overgeslagen door fouten", diagnostics.errors.join(" | ")]);
@@ -409,6 +482,7 @@
   function render(scan) {
     lastScan = scan;
     choices.clear();
+    variantChoices.clear();
 
     counters.broken.textContent = String(scan.counts.broken);
     counters.repairable.textContent = String(scan.counts.repairable);
@@ -473,7 +547,7 @@
     scanButton.disabled = true;
     repairButton.disabled = true;
     lastRepairBox.innerHTML = "";
-    setStatus("Scanning…", "", true);
+    setStatus("Scannen…", "", true);
     send({ type: "scan", scope: scopeSelect.value });
   }
 
@@ -483,18 +557,19 @@
     if (choices.size === 0) return;
     scanButton.disabled = true;
     repairButton.disabled = true;
-    setStatus(`Relinking ${choices.size} component(s)…`, "", true);
+    setStatus(`${choices.size} component(en) herstellen…`, "", true);
     send({
       type: "repair",
       scope: (lastScan && lastScan.scope) || scopeSelect.value,
       choices: Object.fromEntries(choices),
+      variants: Object.fromEntries(variantChoices),
     });
   });
 
   closeButton.addEventListener("click", () => send({ type: "close" }));
 
   scopeSelect.addEventListener("change", () => {
-    setStatus("Scope changed. Scan again to refresh the list.");
+    setStatus("Bereik gewijzigd. Scan opnieuw om de lijst te verversen.");
   });
 
   let connected = false;
@@ -544,8 +619,8 @@
         render(message);
         setStatus(
           message.counts.broken === 0
-            ? "Scan complete. Nothing broken."
-            : `Scan complete: ${message.counts.broken} broken copy/copies, ${message.counts.repairable} with a single match.`,
+            ? "Scan klaar. Niets kapot."
+            : `Scan klaar: ${message.counts.broken} kapotte copy(s), ${message.counts.repairable} met precies één match.`,
           message.counts.broken === 0 ? "ok" : "",
         );
         return;
@@ -555,14 +630,14 @@
         render(message.scan);
         renderRepairDetails(message.details);
         const tone = message.failed > 0 ? "error" : "ok";
-        const detail = message.failures.length ? ` First error: ${message.failures[0].message}` : "";
-        setStatus(`Repaired ${message.fixed}, failed ${message.failed}.${detail}`, tone);
+        const detail = message.failures.length ? ` Eerste fout: ${message.failures[0].message}` : "";
+        setStatus(`${message.fixed} hersteld, ${message.failed} mislukt.${detail}`, tone);
         return;
       }
 
       case "error":
         scanButton.disabled = false;
-        setStatus(`Error: ${message.message}`, "error");
+        setStatus(`Fout: ${message.message}`, "error");
         return;
     }
   });

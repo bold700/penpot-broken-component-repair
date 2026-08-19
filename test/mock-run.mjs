@@ -291,6 +291,10 @@ console.log("\nvariants and overrides");
     components: [variantComponent("c-small", "Small"), variantComponent("c-large", "Large")],
   };
 
+  for (const component of variantLib.components) {
+    component.variants.currentValues = (property) => (property === "Size" ? ["Small", "Large"] : []);
+  }
+
   // A copy that points at a variant component in a library that is gone. Its
   // component still reports which variant it was on.
   const goneVariant = {
@@ -375,6 +379,12 @@ console.log("\nvariants and overrides");
     assert.deepEqual(item.variantProps, { Size: "Large" });
   });
 
+  check("every variant value is offered so the user can pick", () => {
+    assert.deepEqual(item.matches[0].variantProperties, [
+      { name: "Size", values: ["Small", "Large"] },
+    ]);
+  });
+
   handler({ type: "repair", scope: "file", choices: { "s-chip": item.matches[0].key } });
   const repairResult = [...messages].reverse().find((m) => m.type === "repair-result");
   const detail = repairResult.details[0];
@@ -396,6 +406,100 @@ console.log("\nvariants and overrides");
   });
 
   check("nothing failed", () => assert.deepEqual(detail.failed, []));
+}
+
+console.log("\nan explicit variant choice");
+{
+  const switched = [];
+
+  const variantComponent = (id, value) => ({
+    id,
+    libraryId: "lib-var",
+    path: "banken",
+    name: `Type=${value}`,
+    variantProps: { Type: value },
+    __variant: true,
+    variants: {
+      id: "v-banken",
+      properties: ["Type"],
+      currentValues: () => ["A", "B", "C", "D"],
+    },
+  });
+
+  const lib = {
+    id: "lib-var",
+    name: "Meubels",
+    components: ["A", "B", "C", "D"].map((value) => variantComponent("c-" + value, value)),
+  };
+
+  // The link is fully broken: component() gives nothing, so nothing about the
+  // variant can be read off the copy. Only the user knows it was D.
+  const broken = {
+    id: "s-bank",
+    name: "banken",
+    x: 0, y: 0, width: 200, height: 100,
+    isComponentMainInstance: () => false,
+    isComponentCopyInstance: () => true,
+    component: () => null,
+    swapComponent(component) { this.name = component.name; },
+    switchVariant(pos, value) { switched.push({ pos, value }); },
+    resize() {},
+  };
+
+  const page = { id: "bp", name: "Banken", findShapes: () => [broken] };
+  const messages = [];
+  let handler = () => {};
+
+  globalThis.penpot = {
+    theme: "light",
+    selection: [],
+    currentPage: page,
+    currentFile: { id: "bf", pages: [page] },
+    library: { local: { id: "lib-local", name: "Local", components: [] }, connected: [lib] },
+    isVariantComponent: (component) => !!component.__variant,
+    history: { undoBlockBegin: () => Symbol("b"), undoBlockFinish: () => {} },
+    viewport: { zoomIntoView: () => {} },
+    on: () => {},
+    closePlugin: () => {},
+    ui: {
+      open: () => {},
+      sendMessage: (message) => messages.push(message),
+      onMessage: (callback) => { handler = callback; },
+    },
+  };
+
+  new Function(source)();
+  handler({ type: "scan", scope: "file" });
+  const bankScan = [...messages].reverse().find((m) => m.type === "scan-result");
+  const bankItem = bankScan.items[0];
+
+  check("four variants of one container are one entry, not four", () => {
+    assert.equal(bankItem.matches.length, 1);
+    assert.equal(bankItem.status, "repairable");
+  });
+
+  check("the variant cannot be detected, and is not guessed", () => {
+    assert.equal(bankItem.variantProps, null);
+  });
+
+  check("all four values are offered", () => {
+    assert.deepEqual(bankItem.matches[0].variantProperties, [
+      { name: "Type", values: ["A", "B", "C", "D"] },
+    ]);
+  });
+
+  handler({
+    type: "repair",
+    scope: "file",
+    choices: { "s-bank": bankItem.matches[0].key },
+    variants: { "s-bank": { Type: "D" } },
+  });
+  const bankRepair = [...messages].reverse().find((m) => m.type === "repair-result");
+
+  check("the chosen variant is applied instead of the first one", () => {
+    assert.deepEqual(switched, [{ pos: 0, value: "D" }]);
+    assert.deepEqual(bankRepair.details[0].variant, ["Type=D"]);
+  });
 }
 
 console.log(failures === 0 ? "\nAll checks passed.\n" : `\n${failures} check(s) failed.\n`);

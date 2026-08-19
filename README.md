@@ -21,6 +21,19 @@ Penpot's own component swap so overrides survive where Penpot can keep them.
 7. Puts the copy back on the variant it was on with `switchVariant()`, and
    restores what the swap overwrote.
 
+## Variants
+
+A broken copy carries no readable reference to the component it came from, and
+that includes which variant it was on. Guessing is worse than asking: swapping a
+variant container lands on whichever variant Penpot picks first, which is
+usually not the one the designer used.
+
+So the panel lists every variant property of the matched container with all its
+values, and you pick. The pick is preselected when the variant can actually be
+derived, which happens when the dangling component still reports its
+`variantProps` or when the layer name carries them. When it cannot be derived,
+the panel says so instead of quietly taking the first one.
+
 ## What survives a repair
 
 A swap rewrites the layer name and can resize the copy, so everything that
