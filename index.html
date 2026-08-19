@@ -575,7 +575,7 @@
   // leaving a panel that looks fine but does nothing.
   setTimeout(() => {
     if (connected) return;
-    setStatus("Geen verbinding met de Penpot sandbox. plugin.js is niet geladen of crashte bij het starten.", "error");
+    setStatus("Geen verbinding met de Penpot sandbox. plugin.js is niet geladen. In Chrome en Edge komt dit meestal doordat de browser localhost blokkeert: herstart serve.py, of gebruik Firefox.", "error");
     scanButton.disabled = true;
   }, 2500);
   </script>

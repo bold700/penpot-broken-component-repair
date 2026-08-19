@@ -16,11 +16,17 @@ class CORSHandler(http.server.SimpleHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "*")
+        # Chromium (Chrome, Edge) blocks a public https page from fetching
+        # anything on localhost unless the server opts in. Penpot loads
+        # index.html as an iframe, which is allowed, but fetches plugin.js,
+        # which is not, so the panel opens and the sandbox never starts.
+        # Firefox does not implement this, which is why it works there.
+        self.send_header("Access-Control-Allow-Private-Network", "true")
         self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
         super().end_headers()
 
     def do_OPTIONS(self):
-        self.send_response(200)
+        self.send_response(204)
         self.end_headers()
 
     def log_message(self, fmt, *args):
