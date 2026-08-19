@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Serves dist/ with CORS headers so Penpot can load the plugin manifest."""
+"""Serves the plugin with CORS headers so Penpot can load the manifest."""
 import http.server
 import os
 import sys
 
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 7782
-ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dist")
+ROOT = os.path.dirname(os.path.abspath(__file__))
 
 
 class CORSHandler(http.server.SimpleHTTPRequestHandler):
@@ -26,9 +26,6 @@ class CORSHandler(http.server.SimpleHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass
 
-
-if not os.path.isdir(ROOT):
-    sys.exit("dist/ not found. Run: npm run build")
 
 print(f"Broken Component Repair: http://localhost:{PORT}/manifest.json")
 http.server.HTTPServer(("", PORT), CORSHandler).serve_forever()

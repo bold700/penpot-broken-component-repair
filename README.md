@@ -21,54 +21,48 @@ Penpot's own component swap so overrides survive where Penpot can keep them.
 
 Clicking a result name selects that shape on the canvas and zooms to it.
 
-## Install locally
+## Run locally
+
+No build step, no dependencies. Python is enough:
 
 ```bash
-npm install
-npm start          # builds to dist/ and serves it on port 7782
+git clone https://github.com/bold700/penpot-broken-component-repair.git
+cd penpot-broken-component-repair
+python3 serve.py
 ```
 
-Then in Penpot's plugin manager install:
-
-```
-http://localhost:7782/manifest.json
-```
-
-While developing, run the build in watch mode next to the server:
-
-```bash
-npm run watch      # terminal 1
-npm run serve      # terminal 2
-```
+Add to Penpot via `http://localhost:7782/manifest.json`.
 
 ## Hosting it
 
 `manifest.json` uses `"version": 2`, so Penpot resolves `plugin.js` and
-`icon.svg` from wherever the manifest is served. Upload the contents of `dist/`
-to any web host, at the domain root or in a subfolder, and install:
+`icon.svg` from wherever the manifest is served. Upload these four files to any
+web host, at the domain root or in a subfolder:
 
 ```
-https://your-host/path/manifest.json
+manifest.json
+plugin.js
+index.html
+icon.svg
 ```
 
-Nothing in the build is environment specific, so the same `dist/` works locally
-and on a server. The host has to send `Access-Control-Allow-Origin: *` (or the
-Penpot origin) for the manifest and the assets, which is what `serve.py` does
-locally.
+And install `https://your-host/path/manifest.json`.
+
+Nothing in the files is environment specific, so the same set works locally and
+on a server. The host has to send `Access-Control-Allow-Origin: *` (or the
+Penpot origin), which is what `serve.py` does locally.
 
 ## Checks
 
 ```bash
-npm run typecheck  # tsc against @penpot/plugin-types
-npm test           # runs dist/plugin.js against a fake Penpot API
+npm test   # or: node test/mock-run.mjs
 ```
 
-`test/mock-run.mjs` loads the built sandbox bundle with a `penpot` global that
-mimics the real API: three libraries, two pages, healthy copies, main
-instances, a copy whose `component()` throws, a copy that returns null, a copy
-pointing at a removed library, and a swap that fails. It asserts the detection,
-the ambiguity rule, the undo block and the swap calls. Run `npm run build`
-first, since it tests the bundle rather than the sources.
+`test/mock-run.mjs` loads `plugin.js` with a fake `penpot` global that mimics
+the real API: three libraries, two pages, healthy copies, main instances, a copy
+whose `component()` throws, a copy that returns null, a copy pointing at a
+removed library, and a swap that fails. It asserts the detection, the ambiguity
+rule, the undo block and the swap calls. Node only, nothing to install.
 
 ## Known limitation
 
@@ -87,13 +81,12 @@ swallowed, and switching to the page and rescanning is the workaround.
 ## Layout
 
 ```
-index.html            plugin UI (iframe)
-src/plugin.ts         sandbox code, becomes dist/plugin.js
-src/ui.ts             iframe logic
-public/manifest.json  Penpot plugin manifest
-public/icon.svg       plugin icon
-serve.py              static server for dist/ with CORS headers
-test/mock-run.mjs     mock Penpot API harness
+manifest.json      Penpot plugin manifest
+plugin.js          sandbox code
+index.html         plugin UI, logic inlined
+icon.svg           plugin icon
+serve.py           static server with CORS headers
+test/mock-run.mjs  mock Penpot API harness
 ```
 
 Penpot messaging note: the sandbox and the iframe exchange plain objects.

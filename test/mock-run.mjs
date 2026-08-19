@@ -1,13 +1,18 @@
 /**
- * Runs dist/plugin.js against a fake Penpot API.
+ * Runs plugin.js against a fake Penpot API.
  *
  * Penpot plugins cannot be driven from CI, so this harness covers the parts
  * that do not need the real editor: broken-link detection, the library index,
  * ambiguity handling, the undo block and the swap calls.
  *
- * Usage: npm run build && node test/mock-run.mjs
+ * Usage: node test/mock-run.mjs
  */
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "plugin.js"), "utf8");
 
 let failures = 0;
 function check(name, fn) {
@@ -126,7 +131,7 @@ globalThis.penpot = {
 
 // ------------------------------------------------------------------- run
 
-await import("../dist/plugin.js");
+new Function(source)();
 
 const last = (type) => [...sent].reverse().find((message) => message.type === type);
 const byId = (scan, id) => scan.items.find((item) => item.id === id);

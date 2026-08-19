@@ -1,19 +1,9 @@
 {
   "name": "penpot-broken-component-repair",
   "version": "1.0.0",
-  "private": true,
-  "type": "module",
+  "description": "Find component copies with a broken library link and relink them by name",
   "scripts": {
-    "build": "vite build",
-    "typecheck": "tsc --noEmit",
-    "test": "node test/mock-run.mjs",
-    "watch": "vite build --watch",
-    "serve": "python3 serve.py",
-    "start": "npm run build && npm run serve"
-  },
-  "devDependencies": {
-    "@penpot/plugin-types": "1.4.2",
-    "typescript": "^5.7.2",
-    "vite": "^6.1.0"
+    "start": "python3 serve.py 7782",
+    "test": "node test/mock-run.mjs"
   }
 }
