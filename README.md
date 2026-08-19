@@ -35,9 +35,8 @@ Add to Penpot via `http://localhost:7782/manifest.json`.
 
 ## Hosting it
 
-`manifest.json` uses `"version": 2`, so Penpot resolves `plugin.js` and
-`icon.svg` from wherever the manifest is served. Upload these four files to any
-web host, at the domain root or in a subfolder:
+`manifest.json` carries a `host` field, the same pattern as the other plugins in
+this account. Upload these four files to a web host:
 
 ```
 manifest.json
@@ -46,11 +45,10 @@ index.html
 icon.svg
 ```
 
-And install `https://your-host/path/manifest.json`.
-
-Nothing in the files is environment specific, so the same set works locally and
-on a server. The host has to send `Access-Control-Allow-Origin: *` (or the
-Penpot origin), which is what `serve.py` does locally.
+Then set `host` in the uploaded `manifest.json` to that origin, and install
+`https://your-host/path/manifest.json`. The host has to send
+`Access-Control-Allow-Origin: *` (or the Penpot origin), which is what
+`serve.py` does locally.
 
 ## Checks
 

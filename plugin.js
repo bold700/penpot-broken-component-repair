@@ -221,9 +221,7 @@ function selectShape(shapeId) {
   penpot.viewport.zoomIntoView([shape]);
 }
 
-// Relative to the manifest location, so the same files run on localhost and on
-// any host, in a subfolder or at the domain root.
-penpot.ui.open('Broken Component Repair', `index.html?theme=${penpot.theme}`, {
+penpot.ui.open('Broken Component Repair', `?theme=${penpot.theme}`, {
   width: 560,
   height: 700,
 });

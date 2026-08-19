@@ -1,9 +1,9 @@
 {
   "name": "Broken Component Repair",
-  "description": "Find component copies whose library link is broken and relink them to a same-named component from the local or a connected library.",
-  "version": 2,
+  "description": "Find component copies with a broken library link and relink them by name",
+  "host": "http://localhost:7782",
   "code": "plugin.js",
-  "icon": "icon.svg",
+  "icon": "/icon.svg",
   "permissions": [
     "content:read",
     "content:write",
