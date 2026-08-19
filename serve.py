@@ -4,7 +4,7 @@ import http.server
 import os
 import sys
 
-PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 7780
+PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 7782
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dist")
 
 

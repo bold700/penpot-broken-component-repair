@@ -25,13 +25,13 @@ Clicking a result name selects that shape on the canvas and zooms to it.
 
 ```bash
 npm install
-npm start          # builds to dist/ and serves it on port 7780
+npm start          # builds to dist/ and serves it on port 7782
 ```
 
 Then in Penpot's plugin manager install:
 
 ```
-http://localhost:7780/manifest.json
+http://localhost:7782/manifest.json
 ```
 
 While developing, run the build in watch mode next to the server:
