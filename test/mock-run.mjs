@@ -269,5 +269,134 @@ check("a page that cannot be read is reported, not crashed on", () => {
   assert.equal(result.items.length, 0);
 });
 
+// ------------------------------------------------- variants and overrides
+
+console.log("\nvariants and overrides");
+{
+  const switched = [];
+
+  const variantComponent = (id, value) => ({
+    id,
+    libraryId: "lib-var",
+    path: "Chip",
+    name: `Size=${value}`,
+    variantProps: { Size: value },
+    __variant: true,
+    variants: { id: "v-chip", properties: ["Size"] },
+  });
+
+  const variantLib = {
+    id: "lib-var",
+    name: "Variant Library",
+    components: [variantComponent("c-small", "Small"), variantComponent("c-large", "Large")],
+  };
+
+  // A copy that points at a variant component in a library that is gone. Its
+  // component still reports which variant it was on.
+  const goneVariant = {
+    id: "c-gone-variant",
+    libraryId: "lib-removed",
+    path: "",
+    name: "Chip",
+    variantProps: { Size: "Large" },
+    __variant: true,
+    variants: { id: "v-gone", properties: ["Size"] },
+  };
+
+  const broken = {
+    id: "s-chip",
+    name: "Mijn eigen chipnaam",
+    x: 10,
+    y: 20,
+    width: 120,
+    height: 32,
+    rotation: 0,
+    flipX: false,
+    flipY: false,
+    hidden: false,
+    blocked: false,
+    proportionLock: false,
+    constraintsHorizontal: "left",
+    constraintsVertical: "top",
+    isComponentMainInstance: () => false,
+    isComponentCopyInstance: () => true,
+    component: () => goneVariant,
+    // A real swap renames the layer and resizes it to the component default.
+    swapComponent(component) {
+      this.name = component.name;
+      this.width = 64;
+      this.height = 24;
+    },
+    switchVariant(pos, value) {
+      switched.push({ pos, value });
+      this.name = `Size=${value}`;
+    },
+    resize(width, height) {
+      this.width = width;
+      this.height = height;
+    },
+  };
+
+  const page = { id: "vp", name: "Variants", findShapes: () => [broken] };
+  const messages = [];
+  let handler = () => {};
+
+  globalThis.penpot = {
+    theme: "light",
+    selection: [],
+    currentPage: page,
+    currentFile: { id: "vf", pages: [page] },
+    library: { local: { id: "lib-local", name: "Local", components: [] }, connected: [variantLib] },
+    isVariantComponent: (component) => !!component.__variant,
+    history: { undoBlockBegin: () => Symbol("b"), undoBlockFinish: () => {} },
+    viewport: { zoomIntoView: () => {} },
+    on: () => {},
+    closePlugin: () => {},
+    ui: {
+      open: () => {},
+      sendMessage: (message) => messages.push(message),
+      onMessage: (callback) => { handler = callback; },
+    },
+  };
+
+  new Function(source)();
+  handler({ type: "scan", scope: "file" });
+  const varScan = [...messages].reverse().find((m) => m.type === "scan-result");
+  const item = varScan.items[0];
+
+  check("a variant container counts once, not once per variant", () => {
+    assert.equal(varScan.diagnostics.variants, 1);
+    assert.equal(varScan.diagnostics.components, 2);
+    assert.equal(item.matches.length, 1);
+    assert.equal(item.status, "repairable");
+  });
+
+  check("the variant the copy was on is recorded", () => {
+    assert.deepEqual(item.variantProps, { Size: "Large" });
+  });
+
+  handler({ type: "repair", scope: "file", choices: { "s-chip": item.matches[0].key } });
+  const repairResult = [...messages].reverse().find((m) => m.type === "repair-result");
+  const detail = repairResult.details[0];
+
+  check("switchVariant puts it back on the same variant", () => {
+    assert.deepEqual(switched, [{ pos: 0, value: "Large" }]);
+    assert.deepEqual(detail.variant, ["Size=Large"]);
+  });
+
+  check("the layer name the user gave it survives the swap", () => {
+    assert.equal(broken.name, "Mijn eigen chipnaam");
+    assert.ok(detail.restored.includes("name"));
+  });
+
+  check("the size the user gave it survives the swap", () => {
+    assert.equal(broken.width, 120);
+    assert.equal(broken.height, 32);
+    assert.ok(detail.restored.includes("size"));
+  });
+
+  check("nothing failed", () => assert.deepEqual(detail.failed, []));
+}
+
 console.log(failures === 0 ? "\nAll checks passed.\n" : `\n${failures} check(s) failed.\n`);
 process.exit(failures === 0 ? 0 : 1);

@@ -18,6 +18,31 @@ Penpot's own component swap so overrides survive where Penpot can keep them.
    the library yourself in a dropdown.
 6. Repairs with `Shape.swapComponent(component)`, wrapped in a single
    `penpot.history` undo block, so one undo reverts the whole batch.
+7. Puts the copy back on the variant it was on with `switchVariant()`, and
+   restores what the swap overwrote.
+
+## What survives a repair
+
+A swap rewrites the layer name and can resize the copy, so everything that
+belongs to the user rather than to the component is read before the swap and
+put back after:
+
+- the layer name
+- position and size
+- rotation, flips, constraints, visibility, lock, proportion lock
+- the variant it was on, per variant property
+
+Variant components are named after their properties (`Size=Large, State=Hover`),
+so a variant container is indexed once under its container name instead of once
+per variant. Otherwise every `Button` would come back as ambiguous. The exact
+variant is restored afterwards.
+
+Fills, strokes and text are left to Penpot's own override preservation. With the
+old main component gone there is no way to tell an override apart from something
+that was simply inherited, so forcing them back would make the relink pointless.
+
+The panel lists per repaired copy what was preserved, and says so when something
+could not be put back.
 
 Clicking a result name selects that shape on the canvas and zooms to it.
 

@@ -96,7 +96,21 @@
     #status[data-tone="error"] { color: var(--bad); }
     #status[data-tone="ok"] { color: var(--ok); }
 
-    #results { max-height: 380px; overflow: auto; border-top: 1px solid var(--line); }
+    #results { max-height: 340px; overflow: auto; border-top: 1px solid var(--line); }
+
+    #lastRepair:not(:empty) {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      padding: 9px 10px;
+      margin-bottom: 10px;
+      font-size: 11px;
+    }
+    #lastRepair h2 { font-size: 11px; margin: 0 0 5px; letter-spacing: -0.01em; }
+    #lastRepair .line { display: flex; gap: 6px; padding: 2px 0; }
+    #lastRepair .line b { font-weight: 600; }
+    #lastRepair .kept { color: var(--muted); }
+    #lastRepair .lost { color: var(--bad); }
 
     .item { border-bottom: 1px solid var(--line); padding: 10px 2px; display: grid; gap: 5px; }
     .item-head { display: flex; align-items: center; gap: 8px; }
@@ -196,6 +210,8 @@
 
   <div id="status" role="status" aria-live="polite">Ready.</div>
 
+  <div id="lastRepair"></div>
+
   <div id="results"></div>
 
   <details class="diag">
@@ -214,6 +230,7 @@
   const scopeSelect = el("scope");
   const statusLine = el("status");
   const resultsBox = el("results");
+  const lastRepairBox = el("lastRepair");
   const diagnosticsList = el("diagnostics");
 
   const counters = {
@@ -373,6 +390,7 @@
       ["Main components on canvas", String(diagnostics.mainInstances)],
       ["Libraries indexed", String(diagnostics.libraries)],
       ["Library components indexed", String(diagnostics.components)],
+      ["Variant containers", String(diagnostics.variants ?? 0)],
     ];
     if (diagnostics.errors && diagnostics.errors.length) {
       rows.push(["Overgeslagen door fouten", diagnostics.errors.join(" | ")]);
@@ -405,9 +423,56 @@
     updateRepairButton();
   }
 
+  const LABELS = {
+    name: "naam",
+    size: "grootte",
+    x: "positie x",
+    y: "positie y",
+    rotation: "rotatie",
+    flipX: "spiegeling x",
+    flipY: "spiegeling y",
+    hidden: "zichtbaarheid",
+    blocked: "vergrendeling",
+    proportionLock: "verhoudingsslot",
+    constraintsHorizontal: "constraint horizontaal",
+    constraintsVertical: "constraint verticaal",
+  };
+
+  function renderRepairDetails(details) {
+    lastRepairBox.innerHTML = "";
+    if (!details || details.length === 0) return;
+
+    const title = document.createElement("h2");
+    title.textContent = "Behouden bij de laatste reparatie";
+    lastRepairBox.append(title);
+
+    for (const detail of details) {
+      const line = document.createElement("div");
+      line.className = "line";
+
+      const name = document.createElement("b");
+      name.textContent = detail.name || "(naamloos)";
+
+      const kept = document.createElement("span");
+      kept.className = detail.failed && detail.failed.length ? "lost" : "kept";
+
+      const parts = [];
+      if (detail.variant && detail.variant.length) parts.push("variant " + detail.variant.join(", "));
+      const props = (detail.restored || []).map(key => LABELS[key] || key);
+      if (props.length) parts.push(props.join(", "));
+      if (detail.failed && detail.failed.length) parts.push("mislukt: " + detail.failed.join(" | "));
+
+      kept.textContent = parts.length ? parts.join(" · ") : "niets hoefde hersteld te worden";
+
+      line.append(name, kept);
+      lastRepairBox.append(line);
+    }
+  }
+
   function startScan() {
     scanButton.disabled = true;
     repairButton.disabled = true;
+    lastRepairBox.innerHTML = "";
     setStatus("Scanning…", "", true);
     send({ type: "scan", scope: scopeSelect.value });
   }
@@ -488,6 +553,7 @@
       case "repair-result": {
         scanButton.disabled = false;
         render(message.scan);
+        renderRepairDetails(message.details);
         const tone = message.failed > 0 ? "error" : "ok";
         const detail = message.failures.length ? ` First error: ${message.failures[0].message}` : "";
         setStatus(`Repaired ${message.fixed}, failed ${message.failed}.${detail}`, tone);

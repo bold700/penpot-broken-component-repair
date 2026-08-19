@@ -36,9 +36,12 @@ function buildLibraryIndex() {
 
   const byName = new Map();
   const byFullName = new Map();
+  const byVariantContainer = new Map();
+  const seenVariants = new Set();
   const local = penpot.library.local;
   const libraries = [local, ...penpot.library.connected];
   let components = 0;
+  let variants = 0;
 
   for (const library of libraries) {
     for (const component of library.components) {
@@ -53,14 +56,32 @@ function buildLibraryIndex() {
         fullName: joinPath(component.path || '', component.name),
       };
 
+      const variant = variantInfo(component);
+      match.isVariant = !!variant;
+      match.variantProps = variant ? variant.props : null;
+      match.containerName = variant ? lastPathSegment(component.path || '') : '';
+
       componentCache.set(key, component);
       pushMatch(byName, component.name.trim(), match);
       pushMatch(byFullName, match.fullName.trim(), match);
+
+      // A variant container shows up once, not once per variant, otherwise
+      // every "Button" would look ambiguous. The exact variant is restored
+      // afterwards with switchVariant.
+      if (variant && match.containerName) {
+        const variantKey = (variant.id || match.containerName) + '@' + library.id;
+        if (!seenVariants.has(variantKey)) {
+          seenVariants.add(variantKey);
+          pushMatch(byVariantContainer, match.containerName, match);
+          variants++;
+        }
+      }
+
       components++;
     }
   }
 
-  return { byName, byFullName, libraryCount: libraries.length, components };
+  return { byName, byFullName, byVariantContainer, libraryCount: libraries.length, components, variants };
 }
 
 /** Reads the linked component without letting a broken reference throw. */
@@ -92,6 +113,7 @@ function scan(scope) {
     mainInstances: 0,
     libraries: index.libraryCount,
     components: index.components,
+    variants: index.variants,
     errors: [],
   };
 
@@ -152,6 +174,7 @@ function scan(scope) {
       const matches =
         index.byFullName.get(lookupName) ||
         index.byName.get(lookupName) ||
+        index.byVariantContainer.get(lookupName) ||
         [];
 
       const status = matches.length === 1
@@ -163,6 +186,7 @@ function scan(scope) {
         id: shape.id,
         shapeName: shape.name,
         lookupName,
+        variantProps: readVariantProps(shape, component),
         pageId: page.id,
         pageName: page.name,
         reason,
@@ -173,6 +197,146 @@ function scan(scope) {
   }
 
   return { items, diagnostics };
+}
+
+// ---------------------------------------------------------------- variants
+//
+// Penpot names a variant component after its properties: "Size=Large, State=Hover".
+// The container name (the thing a designer calls "Button") is the last segment
+// of the component path.
+
+function parseVariantProps(name) {
+  const props = {};
+  for (const part of String(name || '').split(',')) {
+    const match = part.trim().match(/^([^=]+)=(.+)$/);
+    if (match) props[match[1].trim()] = match[2].trim();
+  }
+  return Object.keys(props).length ? props : null;
+}
+
+function variantInfo(component) {
+  try {
+    if (!penpot.isVariantComponent || !penpot.isVariantComponent(component)) return null;
+    return {
+      id: component.variants ? component.variants.id : null,
+      props: component.variantProps || parseVariantProps(component.name),
+    };
+  } catch (e) {
+    return null;
+  }
+}
+
+function lastPathSegment(path) {
+  const parts = String(path || '').split('/').filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : '';
+}
+
+/** The variant properties this copy had before it broke, if we can tell. */
+function readVariantProps(shape, component) {
+  if (component) {
+    const info = variantInfo(component);
+    if (info && info.props) return info.props;
+  }
+  return parseVariantProps(shape.name);
+}
+
+/**
+ * Puts the copy back on the variant it was on. swapComponent lands on whichever
+ * variant we matched, switchVariant walks it to the right one per property.
+ */
+function restoreVariant(shape, component, wanted) {
+  if (!wanted) return null;
+
+  const info = variantInfo(component);
+  if (!info || !info.props) return null;
+
+  let names = [];
+  try {
+    names = (component.variants && component.variants.properties) || [];
+  } catch (e) {
+    return null;
+  }
+
+  const applied = [];
+  const failed = [];
+  for (const property of Object.keys(wanted)) {
+    const pos = names.indexOf(property);
+    if (pos < 0) continue;
+    if (info.props[property] === wanted[property]) continue;
+
+    try {
+      shape.switchVariant(pos, wanted[property]);
+      applied.push(property + '=' + wanted[property]);
+    } catch (e) {
+      failed.push(property + ': ' + e.message);
+    }
+  }
+
+  return { applied, failed };
+}
+
+// ---------------------------------------------------------------- overrides
+//
+// A swap can rewrite the layer name and the size. Those belong to the user, not
+// to the component, so they are put back. Fills and text are left to Penpot's
+// own override preservation: with the old main component gone there is no way to
+// tell an override apart from something that was simply inherited.
+
+const CAPTURED = [
+  'name', 'x', 'y', 'width', 'height', 'rotation', 'flipX', 'flipY',
+  'hidden', 'blocked', 'proportionLock', 'constraintsHorizontal', 'constraintsVertical',
+];
+
+function captureShape(shape) {
+  const props = {};
+  for (const key of CAPTURED) {
+    try {
+      props[key] = shape[key];
+    } catch (e) {
+      // not readable on this shape type, skip it
+    }
+  }
+  return props;
+}
+
+function restoreShape(shape, before) {
+  const restored = [];
+  const failed = [];
+
+  const put = (key, apply) => {
+    if (!(key in before)) return;
+    try {
+      if (apply(before[key])) restored.push(key);
+    } catch (e) {
+      failed.push(key + ': ' + e.message);
+    }
+  };
+
+  // Size first: resizing can move things, position is corrected right after.
+  if ('width' in before && 'height' in before) {
+    try {
+      if (shape.width !== before.width || shape.height !== before.height) {
+        shape.resize(before.width, before.height);
+        restored.push('size');
+      }
+    } catch (e) {
+      failed.push('size: ' + e.message);
+    }
+  }
+
+  put('x', value => shape.x !== value && ((shape.x = value), true));
+  put('y', value => shape.y !== value && ((shape.y = value), true));
+  put('name', value => shape.name !== value && ((shape.name = value), true));
+  put('rotation', value => shape.rotation !== value && ((shape.rotation = value), true));
+  put('flipX', value => shape.flipX !== value && ((shape.flipX = value), true));
+  put('flipY', value => shape.flipY !== value && ((shape.flipY = value), true));
+  put('hidden', value => shape.hidden !== value && ((shape.hidden = value), true));
+  put('blocked', value => shape.blocked !== value && ((shape.blocked = value), true));
+  put('proportionLock', value => shape.proportionLock !== value && ((shape.proportionLock = value), true));
+  put('constraintsHorizontal', value => shape.constraintsHorizontal !== value && ((shape.constraintsHorizontal = value), true));
+  put('constraintsVertical', value => shape.constraintsVertical !== value && ((shape.constraintsVertical = value), true));
+
+  return { restored, failed };
 }
 
 function scanPayload(scope) {
@@ -195,6 +359,7 @@ function scanPayload(scope) {
 function repair(request) {
   const entries = Object.entries(request.choices || {});
   const failures = [];
+  const details = [];
   let fixed = 0;
 
   const blockId = penpot.history.undoBlockBegin();
@@ -214,8 +379,24 @@ function repair(request) {
       }
 
       try {
+        // Everything the user owns is read before the swap and put back after,
+        // because a swap rewrites the layer name and can resize the copy.
+        const before = captureShape(shape);
+        const wantedVariant = readVariantProps(shape, resolveComponent(shape));
+
         shape.swapComponent(component);
+
+        const variant = restoreVariant(shape, component, wantedVariant);
+        const shapeRestore = restoreShape(shape, before);
+
         fixed++;
+        details.push({
+          id: shapeId,
+          name: before.name,
+          restored: shapeRestore.restored,
+          variant: variant ? variant.applied : [],
+          failed: shapeRestore.failed.concat(variant ? variant.failed : []),
+        });
       } catch (e) {
         failures.push({ id: shapeId, message: e.message });
       }
@@ -229,6 +410,7 @@ function repair(request) {
     fixed,
     failed: failures.length,
     failures,
+    details,
     scan: scanPayload(request.scope),
   });
 }
