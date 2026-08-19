@@ -267,7 +267,9 @@ function select(shapeId: string) {
   penpot.viewport.zoomIntoView([shape]);
 }
 
-penpot.ui.open("Broken Component Repair", `?theme=${penpot.theme}`, {
+// Relative to the manifest location, so the same build runs on localhost and
+// on any host, in a subfolder or at the domain root.
+penpot.ui.open("Broken Component Repair", `index.html?theme=${penpot.theme}`, {
   width: 560,
   height: 700,
 });

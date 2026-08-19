@@ -41,8 +41,20 @@ npm run watch      # terminal 1
 npm run serve      # terminal 2
 ```
 
-For a hosted deployment, change `host` in `public/manifest.json` to the public
-origin and serve `dist/`.
+## Hosting it
+
+`manifest.json` uses `"version": 2`, so Penpot resolves `plugin.js` and
+`icon.svg` from wherever the manifest is served. Upload the contents of `dist/`
+to any web host, at the domain root or in a subfolder, and install:
+
+```
+https://your-host/path/manifest.json
+```
+
+Nothing in the build is environment specific, so the same `dist/` works locally
+and on a server. The host has to send `Access-Control-Allow-Origin: *` (or the
+Penpot origin) for the manifest and the assets, which is what `serve.py` does
+locally.
 
 ## Checks
 
