@@ -36,16 +36,23 @@ function buildLibraryIndex() {
 
   const byName = new Map();
   const byFullName = new Map();
-  const byVariantContainer = new Map();
-  const seenVariants = new Set();
+  const byContainer = new Map();
   const local = penpot.library.local;
   const libraries = [local, ...penpot.library.connected];
   let components = 0;
-  let variants = 0;
 
   for (const library of libraries) {
+    // Variants of one component live under the same container. Penpot exposes
+    // that as a variants id, and names the components after their properties.
+    // When the variants API is not available the shared path is the container,
+    // which covers plain path-grouped components too.
+    const groups = new Map();
+
     for (const component of library.components) {
       const key = library.id + ':' + component.id;
+      const variant = variantInfo(component);
+      const containerName = lastPathSegment(component.path || '');
+
       const match = {
         key,
         libraryId: library.id,
@@ -54,35 +61,49 @@ function buildLibraryIndex() {
         path: component.path || '',
         name: component.name,
         fullName: joinPath(component.path || '', component.name),
+        isVariant: !!variant,
+        variantProps: variant ? variant.props : null,
+        containerName,
       };
-
-      const variant = variantInfo(component);
-      match.isVariant = !!variant;
-      match.variantProps = variant ? variant.props : null;
-      match.variantProperties = variant ? readVariantProperties(component) : null;
-      match.containerName = variant ? lastPathSegment(component.path || '') : '';
 
       componentCache.set(key, component);
       pushMatch(byName, component.name.trim(), match);
       pushMatch(byFullName, match.fullName.trim(), match);
-
-      // A variant container shows up once, not once per variant, otherwise
-      // every "Button" would look ambiguous. The exact variant is restored
-      // afterwards with switchVariant.
-      if (variant && match.containerName) {
-        const variantKey = (variant.id || match.containerName) + '@' + library.id;
-        if (!seenVariants.has(variantKey)) {
-          seenVariants.add(variantKey);
-          pushMatch(byVariantContainer, match.containerName, match);
-          variants++;
-        }
-      }
-
       components++;
+
+      if (!containerName) continue;
+      const groupKey = library.id + '@' + ((variant && variant.id) || containerName);
+      const group = groups.get(groupKey);
+      if (group) group.push(match);
+      else groups.set(groupKey, [match]);
+    }
+
+    // A container shows up once in the list. Which of its members to use is a
+    // second choice, so that "banken" does not come back as "4 matches".
+    for (const group of groups.values()) {
+      if (group.length < 2) continue;
+
+      const head = group[0];
+      head.variants = group.map(member => ({
+        key: member.key,
+        label: variantLabel(member),
+        props: member.variantProps,
+      }));
+      pushMatch(byContainer, head.containerName.trim(), head);
     }
   }
 
-  return { byName, byFullName, byVariantContainer, libraryCount: libraries.length, components, variants };
+  const variantContainers = Array.from(byContainer.values()).reduce((total, list) => total + list.length, 0);
+  return { byName, byFullName, byContainer, libraryCount: libraries.length, components, variants: variantContainers };
+}
+
+/** How one member of a container is shown in the variant dropdown. */
+function variantLabel(match) {
+  if (match.variantProps) {
+    const parts = Object.keys(match.variantProps).map(key => key + '=' + match.variantProps[key]);
+    if (parts.length) return parts.join(', ');
+  }
+  return match.name;
 }
 
 /** Reads the linked component without letting a broken reference throw. */
@@ -175,7 +196,7 @@ function scan(scope) {
       const matches =
         index.byFullName.get(lookupName) ||
         index.byName.get(lookupName) ||
-        index.byVariantContainer.get(lookupName) ||
+        index.byContainer.get(lookupName) ||
         [];
 
       const status = matches.length === 1

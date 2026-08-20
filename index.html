@@ -246,8 +246,11 @@
 
   /** shape id -> chosen library component key */
   const choices = new Map();
-  /** shape id -> { variantProperty: value } */
-  const variantChoices = new Map();
+  function sameProps(a, b) {
+    if (!a || !b) return false;
+    const keys = Object.keys(b);
+    return keys.length > 0 && keys.every(key => a[key] === b[key]);
+  }
   let lastScan = null;
 
   function send(message) {
@@ -352,72 +355,60 @@
     const variantBox = document.createElement("div");
     variantBox.className = "variants";
 
-    // A variant container is one entry in the list above. Which of its variants
-    // the copy was on cannot be read off a broken link, so it is picked here.
-    function renderVariantPickers() {
+    // A container is one entry in the list above. Which member of it the copy
+    // used cannot be read off a broken link, so it is picked here and swapped
+    // to directly.
+    function renderVariantPicker() {
       variantBox.innerHTML = "";
-      variantChoices.delete(item.id);
 
-      const match = item.matches.find(candidate => candidate.key === select.value);
-      if (!match || !match.variantProperties) return;
+      const containerKey = select.value;
+      const match = item.matches.find(candidate => candidate.key === containerKey);
+      if (!match || !match.variants || match.variants.length < 2) return;
 
-      const detected = item.variantProps || {};
-      const chosen = {};
+      const detected = item.variantProps;
+      const guessed = detected
+        ? match.variants.find(variant => sameProps(variant.props, detected))
+        : null;
 
-      for (const property of match.variantProperties) {
-        const row = document.createElement("div");
-        row.className = "choice";
+      const picker = document.createElement("select");
+      picker.id = `variant-${item.id}`;
 
-        const picker = document.createElement("select");
-        picker.id = `variant-${item.id}-${property.name}`;
-
-        const unknown = document.createElement("option");
-        unknown.value = "";
-        unknown.textContent = "eerste variant";
-        picker.append(unknown);
-
-        for (const value of property.values) {
-          const option = document.createElement("option");
-          option.value = value;
-          option.textContent = value;
-          picker.append(option);
-        }
-
-        if (detected[property.name] && property.values.includes(detected[property.name])) {
-          picker.value = detected[property.name];
-          chosen[property.name] = detected[property.name];
-        }
-
-        picker.addEventListener("change", () => {
-          if (picker.value) chosen[property.name] = picker.value;
-          else delete chosen[property.name];
-          if (Object.keys(chosen).length) variantChoices.set(item.id, chosen);
-          else variantChoices.delete(item.id);
-          warn.hidden = Object.keys(chosen).length > 0;
-        });
-
-        const pickerLabel = document.createElement("label");
-        pickerLabel.className = "meta";
-        pickerLabel.htmlFor = picker.id;
-        pickerLabel.textContent = property.name;
-
-        row.append(pickerLabel, picker);
-        variantBox.append(row);
+      for (const variant of match.variants) {
+        const option = document.createElement("option");
+        option.value = variant.key;
+        option.textContent = variant.label;
+        picker.append(option);
       }
+
+      picker.value = guessed ? guessed.key : match.variants[0].key;
+      choices.set(item.id, picker.value);
+
+      picker.addEventListener("change", () => {
+        choices.set(item.id, picker.value);
+        warn.hidden = true;
+      });
+
+      const pickerLabel = document.createElement("label");
+      pickerLabel.className = "meta";
+      pickerLabel.htmlFor = picker.id;
+      pickerLabel.textContent = "Variant";
+
+      const row = document.createElement("div");
+      row.className = "choice";
+      row.append(pickerLabel, picker);
 
       const warn = document.createElement("div");
       warn.className = "meta warn";
-      warn.textContent = "Variant niet af te leiden uit de kapotte copy. Kies hem, anders wordt het de eerste.";
-      warn.hidden = Object.keys(chosen).length > 0;
-      variantBox.append(warn);
+      warn.textContent = `Welke variant deze copy gebruikte is niet af te leiden. Kies hem zelf, anders wordt het "${match.variants[0].label}".`;
+      warn.hidden = !!guessed;
 
-      if (Object.keys(chosen).length) variantChoices.set(item.id, chosen);
+      variantBox.append(row, warn);
     }
 
     select.addEventListener("change", () => {
       if (select.value) choices.set(item.id, select.value);
       else choices.delete(item.id);
-      renderVariantPickers();
+      renderVariantPicker();
       updateRepairButton();
     });
 
@@ -428,7 +419,7 @@
 
     choice.append(selectLabel, select);
     row.append(choice, variantBox);
-    renderVariantPickers();
+    renderVariantPicker();
     return row;
   }
 
@@ -482,7 +473,6 @@
   function render(scan) {
     lastScan = scan;
     choices.clear();
-    variantChoices.clear();
 
     counters.broken.textContent = String(scan.counts.broken);
     counters.repairable.textContent = String(scan.counts.repairable);
@@ -562,7 +552,6 @@
       type: "repair",
       scope: (lastScan && lastScan.scope) || scopeSelect.value,
       choices: Object.fromEntries(choices),
-      variants: Object.fromEntries(variantChoices),
     });
   });
 

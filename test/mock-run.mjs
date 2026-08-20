@@ -379,10 +379,8 @@ console.log("\nvariants and overrides");
     assert.deepEqual(item.variantProps, { Size: "Large" });
   });
 
-  check("every variant value is offered so the user can pick", () => {
-    assert.deepEqual(item.matches[0].variantProperties, [
-      { name: "Size", values: ["Small", "Large"] },
-    ]);
+  check("both variants are offered under one entry", () => {
+    assert.deepEqual(item.matches[0].variants.map((v) => v.label), ["Size=Small", "Size=Large"]);
   });
 
   handler({ type: "repair", scope: "file", choices: { "s-chip": item.matches[0].key } });
@@ -410,8 +408,6 @@ console.log("\nvariants and overrides");
 
 console.log("\nan explicit variant choice");
 {
-  const switched = [];
-
   const variantComponent = (id, value) => ({
     id,
     libraryId: "lib-var",
@@ -434,6 +430,7 @@ console.log("\nan explicit variant choice");
 
   // The link is fully broken: component() gives nothing, so nothing about the
   // variant can be read off the copy. Only the user knows it was D.
+  const swappedTo = [];
   const broken = {
     id: "s-bank",
     name: "banken",
@@ -441,8 +438,8 @@ console.log("\nan explicit variant choice");
     isComponentMainInstance: () => false,
     isComponentCopyInstance: () => true,
     component: () => null,
-    swapComponent(component) { this.name = component.name; },
-    switchVariant(pos, value) { switched.push({ pos, value }); },
+    swapComponent(component) { swappedTo.push(component.id); this.name = component.name; },
+    switchVariant() {},
     resize() {},
   };
 
@@ -482,23 +479,21 @@ console.log("\nan explicit variant choice");
     assert.equal(bankItem.variantProps, null);
   });
 
-  check("all four values are offered", () => {
-    assert.deepEqual(bankItem.matches[0].variantProperties, [
-      { name: "Type", values: ["A", "B", "C", "D"] },
+  check("all four variants are offered by name", () => {
+    assert.deepEqual(bankItem.matches[0].variants.map((v) => v.label), [
+      "Type=A", "Type=B", "Type=C", "Type=D",
     ]);
   });
 
-  handler({
-    type: "repair",
-    scope: "file",
-    choices: { "s-bank": bankItem.matches[0].key },
-    variants: { "s-bank": { Type: "D" } },
-  });
+  // The panel sends the key of the variant the user picked, not the container.
+  const wantedD = bankItem.matches[0].variants.find((v) => v.label === "Type=D");
+  handler({ type: "repair", scope: "file", choices: { "s-bank": wantedD.key } });
   const bankRepair = [...messages].reverse().find((m) => m.type === "repair-result");
 
-  check("the chosen variant is applied instead of the first one", () => {
-    assert.deepEqual(switched, [{ pos: 0, value: "D" }]);
-    assert.deepEqual(bankRepair.details[0].variant, ["Type=D"]);
+  check("it swaps straight to D instead of landing on A", () => {
+    assert.equal(bankRepair.fixed, 1);
+    assert.equal(swappedTo.length, 1);
+    assert.equal(swappedTo[0], "c-D");
   });
 }
 
