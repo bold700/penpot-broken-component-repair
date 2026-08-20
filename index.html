@@ -194,7 +194,6 @@
   <div class="toolbar">
     <button id="scan" type="button">Scannen</button>
     <button id="repair" type="button" disabled>Herstel selectie</button>
-    <button id="close" type="button" class="secondary">Sluiten</button>
 
     <div class="scope">
       <label for="scope">Bereik</label>
@@ -230,7 +229,6 @@
 
   const scanButton = el("scan");
   const repairButton = el("repair");
-  const closeButton = el("close");
   const scopeSelect = el("scope");
   const statusLine = el("status");
   const resultsBox = el("results");
@@ -556,7 +554,6 @@
     });
   });
 
-  closeButton.addEventListener("click", () => send({ type: "close" }));
 
   scopeSelect.addEventListener("change", () => {
     setStatus("Bereik gewijzigd. Scan opnieuw om de lijst te verversen.");

@@ -692,10 +692,6 @@ penpot.ui.onMessage(msg => {
       selectShape(msg.id);
       return;
     }
-
-    if (msg.type === 'close') {
-      penpot.closePlugin();
-    }
   } catch (e) {
     penpot.ui.sendMessage({ type: 'error', message: e.message });
   }
