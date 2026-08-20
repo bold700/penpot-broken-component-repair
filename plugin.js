@@ -40,6 +40,7 @@ function buildLibraryIndex() {
   const local = penpot.library.local;
   const libraries = [local, ...penpot.library.connected];
   let components = 0;
+  let variantContainers = 0;
 
   for (const library of libraries) {
     // Variants of one component live under the same container. Penpot exposes
@@ -47,6 +48,7 @@ function buildLibraryIndex() {
     // When the variants API is not available the shared path is the container,
     // which covers plain path-grouped components too.
     const groups = new Map();
+    const seenContainers = new Set();
 
     for (const component of library.components) {
       const key = library.id + ':' + component.id;
@@ -67,9 +69,32 @@ function buildLibraryIndex() {
       };
 
       componentCache.set(key, component);
+      components++;
+
+      // Ask the container for its own members. That is the only reliable route:
+      // a library can list a variant set as one entry instead of one per
+      // variant, and then grouping the list would never see more than one.
+      const members = variantMembers(component);
+      if (members) {
+        const containerKey = library.id + '@' + ((variant && variant.id) || containerName || component.id);
+        if (seenContainers.has(containerKey)) continue;
+        seenContainers.add(containerKey);
+        variantContainers++;
+
+        match.isVariant = true;
+        match.variants = members.map(member => {
+          const memberKey = library.id + ':' + member.id;
+          componentCache.set(memberKey, member);
+          const props = memberVariantProps(member);
+          return { key: memberKey, label: variantLabel(props, member.name), props };
+        });
+
+        for (const name of containerNames(match, members)) pushMatch(byContainer, name, match);
+        continue;
+      }
+
       pushMatch(byName, component.name.trim(), match);
       pushMatch(byFullName, match.fullName.trim(), match);
-      components++;
 
       if (!containerName) continue;
       const groupKey = library.id + '@' + ((variant && variant.id) || containerName);
@@ -86,24 +111,85 @@ function buildLibraryIndex() {
       const head = group[0];
       head.variants = group.map(member => ({
         key: member.key,
-        label: variantLabel(member),
+        label: variantLabel(member.variantProps, member.name),
         props: member.variantProps,
       }));
       pushMatch(byContainer, head.containerName.trim(), head);
+      variantContainers++;
     }
   }
 
-  const variantContainers = Array.from(byContainer.values()).reduce((total, list) => total + list.length, 0);
   return { byName, byFullName, byContainer, libraryCount: libraries.length, components, variants: variantContainers };
 }
 
 /** How one member of a container is shown in the variant dropdown. */
-function variantLabel(match) {
-  if (match.variantProps) {
-    const parts = Object.keys(match.variantProps).map(key => key + '=' + match.variantProps[key]);
+function variantLabel(props, fallbackName) {
+  if (props) {
+    const parts = Object.keys(props).map(key => key + '=' + props[key]);
     if (parts.length) return parts.join(', ');
   }
-  return match.name;
+  return fallbackName;
+}
+
+/** Every component of the variant container this component belongs to. */
+function variantMembers(component) {
+  try {
+    const variants = component.variants;
+    if (!variants || typeof variants.variantComponents !== 'function') return null;
+
+    const members = variants.variantComponents() || [];
+    return members.length > 1 ? members : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function memberVariantProps(component) {
+  try {
+    const props = component.variantProps;
+    if (props && Object.keys(props).length) return props;
+  } catch (e) {
+    // fall through to the name
+  }
+  return parseVariantProps(component.name);
+}
+
+/**
+ * Every name a designer could have used for this container, because the broken
+ * copy is looked up by name. Penpot names a variant component after its
+ * properties ("Type=A"), and such a name is never what the copy was called.
+ */
+function containerNames(match, members) {
+  const names = new Set();
+  const add = value => {
+    const clean = String(value || '').trim();
+    if (clean) names.add(clean);
+  };
+
+  if (!parseVariantProps(match.name)) {
+    add(match.name);
+    add(match.fullName);
+  }
+  add(match.containerName);
+  add(match.path);
+
+  // A member name is only a container name when every member carries it. One
+  // member called "a" is a variant value, not something a copy was named after.
+  const memberNames = new Set();
+  for (const member of members) {
+    try {
+      memberNames.add(String(member.name || '').trim());
+      add(lastPathSegment(member.path || ''));
+    } catch (e) {
+      // a member that cannot be read is simply not a lookup key
+    }
+  }
+  if (memberNames.size === 1) {
+    const shared = Array.from(memberNames)[0];
+    if (!parseVariantProps(shared)) add(shared);
+  }
+
+  return names;
 }
 
 /** Reads the linked component without letting a broken reference throw. */
@@ -124,6 +210,32 @@ function safeRead(read) {
   }
 }
 
+/**
+ * True when the shape sits inside another component copy. Penpot marks every
+ * shape in a copy as a copy instance, so without this a broken "banken" would
+ * be reported again for every child it contains.
+ */
+function isInsideCopy(shape) {
+  let parent;
+  try {
+    parent = shape.parent;
+  } catch (e) {
+    return false;
+  }
+
+  let depth = 0;
+  while (parent && depth < 100) {
+    try {
+      if (typeof parent.isComponentCopyInstance === 'function' && parent.isComponentCopyInstance()) return true;
+      parent = parent.parent;
+    } catch (e) {
+      return false;
+    }
+    depth++;
+  }
+  return false;
+}
+
 function scan(scope) {
   const index = buildLibraryIndex();
   const pages = pagesInScope(scope);
@@ -133,6 +245,7 @@ function scan(scope) {
     shapes: 0,
     copyInstances: 0,
     mainInstances: 0,
+    nested: 0,
     libraries: index.libraryCount,
     components: index.components,
     variants: index.variants,
@@ -170,6 +283,14 @@ function scan(scope) {
       }
 
       if (!isCopy) continue;
+
+      // Everything inside a copy is a copy too. Only the root of the instance
+      // is swappable, so a rectangle inside a broken "banken" is not a finding.
+      if (isInsideCopy(shape)) {
+        diagnostics.nested++;
+        continue;
+      }
+
       diagnostics.copyInstances++;
 
       const component = resolveComponent(shape);
@@ -236,9 +357,30 @@ function parseVariantProps(name) {
   return Object.keys(props).length ? props : null;
 }
 
+function isVariantComponent(component) {
+  if (!component) return false;
+
+  try {
+    if (typeof component.isVariant === 'function' && component.isVariant()) return true;
+  } catch (e) {
+    // older builds: fall through
+  }
+  try {
+    if (penpot.isVariantComponent && penpot.isVariantComponent(component)) return true;
+  } catch (e) {
+    // not available here
+  }
+  try {
+    if (component.variants && component.variantProps) return true;
+  } catch (e) {
+    // not readable, so not a variant as far as we are concerned
+  }
+  return false;
+}
+
 function variantInfo(component) {
   try {
-    if (!penpot.isVariantComponent || !penpot.isVariantComponent(component)) return null;
+    if (!isVariantComponent(component)) return null;
     return {
       id: component.variants ? component.variants.id : null,
       props: component.variantProps || parseVariantProps(component.name),

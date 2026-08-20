@@ -497,5 +497,155 @@ console.log("\nan explicit variant choice");
   });
 }
 
+console.log("\nonly the instance root is a finding");
+{
+  // Penpot marks every shape inside a copy as a copy instance, so the plugin
+  // must report the copy and not the rectangle that lives in it.
+  const gone = { id: "c-weg", libraryId: "lib-weg", path: "", name: "banken" };
+
+  const bank = {
+    id: "s-bank-root",
+    name: "banken",
+    parent: null,
+    isComponentMainInstance: () => false,
+    isComponentCopyInstance: () => true,
+    component: () => gone,
+    swapComponent() {},
+  };
+
+  const rectangle = {
+    id: "s-rect-child",
+    name: "Rectangle",
+    parent: bank,
+    isComponentMainInstance: () => false,
+    isComponentCopyInstance: () => true,
+    component: () => gone,
+    swapComponent() {},
+  };
+
+  const page = { id: "rp", name: "Page 1", findShapes: () => [bank, rectangle] };
+  const messages = [];
+  let handler = () => {};
+
+  globalThis.penpot = {
+    theme: "light",
+    selection: [],
+    currentPage: page,
+    currentFile: { id: "rf", pages: [page] },
+    library: { local: { id: "lib-local", name: "Local", components: [] }, connected: [] },
+    history: { undoBlockBegin: () => Symbol("b"), undoBlockFinish: () => {} },
+    viewport: { zoomIntoView: () => {} },
+    on: () => {},
+    closePlugin: () => {},
+    ui: {
+      open: () => {},
+      sendMessage: (message) => messages.push(message),
+      onMessage: (callback) => { handler = callback; },
+    },
+  };
+
+  new Function(source)();
+  handler({ type: "scan", scope: "file" });
+  const rootScan = [...messages].reverse().find((m) => m.type === "scan-result");
+
+  check("a rectangle inside a broken copy is not a second finding", () => {
+    assert.deepEqual(rootScan.items.map((i) => i.shapeName), ["banken"]);
+    assert.equal(rootScan.counts.broken, 1);
+  });
+
+  check("the skipped children are still counted", () => {
+    assert.equal(rootScan.diagnostics.nested, 1);
+    assert.equal(rootScan.diagnostics.copyInstances, 1);
+  });
+}
+
+console.log("\na library that lists a variant set as one component");
+{
+  // What the real API does: library.components has one entry for "banken", and
+  // the four variants only come out of variants.variantComponents().
+  const member = (id, value) => ({
+    id,
+    libraryId: "lib-var",
+    path: "",
+    name: value,
+    variantProps: { "Property 1": value },
+    isVariant: () => true,
+  });
+
+  const members = ["a", "b", "c", "d"].map((value) => member("c-" + value, value));
+  const variants = {
+    id: "v-banken",
+    libraryId: "lib-var",
+    properties: ["Property 1"],
+    currentValues: () => ["a", "b", "c", "d"],
+    variantComponents: () => members,
+  };
+  for (const entry of members) entry.variants = variants;
+
+  const container = { ...members[0], id: "c-banken", name: "banken", variants };
+  const lib = { id: "lib-var", name: "library 1.0", components: [container] };
+
+  const swappedTo = [];
+  const broken = {
+    id: "s-bank",
+    name: "banken",
+    parent: null,
+    x: 0, y: 0, width: 167, height: 196,
+    isComponentMainInstance: () => false,
+    isComponentCopyInstance: () => true,
+    component: () => null,
+    swapComponent(component) { swappedTo.push(component.id); this.name = component.name; },
+    switchVariant() {},
+    resize() {},
+  };
+
+  const page = { id: "vp2", name: "Page 1", findShapes: () => [broken] };
+  const messages = [];
+  let handler = () => {};
+
+  globalThis.penpot = {
+    theme: "light",
+    selection: [],
+    currentPage: page,
+    currentFile: { id: "vf2", pages: [page] },
+    library: { local: { id: "lib-local", name: "Local", components: [] }, connected: [lib] },
+    history: { undoBlockBegin: () => Symbol("b"), undoBlockFinish: () => {} },
+    viewport: { zoomIntoView: () => {} },
+    on: () => {},
+    closePlugin: () => {},
+    ui: {
+      open: () => {},
+      sendMessage: (message) => messages.push(message),
+      onMessage: (callback) => { handler = callback; },
+    },
+  };
+
+  new Function(source)();
+  handler({ type: "scan", scope: "file" });
+  const scan = [...messages].reverse().find((m) => m.type === "scan-result");
+  const item = scan.items[0];
+
+  check("the container is one match, found on its own name", () => {
+    assert.equal(item.matches.length, 1);
+    assert.equal(item.status, "repairable");
+    assert.equal(scan.diagnostics.variants, 1);
+  });
+
+  check("all four variants come out of the container", () => {
+    assert.deepEqual(item.matches[0].variants.map((v) => v.label), [
+      "Property 1=a", "Property 1=b", "Property 1=c", "Property 1=d",
+    ]);
+  });
+
+  const wantedC = item.matches[0].variants.find((v) => v.label === "Property 1=c");
+  handler({ type: "repair", scope: "file", choices: { "s-bank": wantedC.key } });
+  const repaired = [...messages].reverse().find((m) => m.type === "repair-result");
+
+  check("the picked variant is what gets swapped in", () => {
+    assert.equal(repaired.fixed, 1);
+    assert.deepEqual(swappedTo, ["c-c"]);
+  });
+}
+
 console.log(failures === 0 ? "\nAll checks passed.\n" : `\n${failures} check(s) failed.\n`);
 process.exit(failures === 0 ? 0 : 1);
