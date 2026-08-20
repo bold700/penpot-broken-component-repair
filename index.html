@@ -46,10 +46,6 @@
       line-height: 1.5;
     }
 
-    h1 { font-size: 15px; letter-spacing: -0.01em; margin: 0 0 4px; }
-
-    .sub { color: var(--muted); font-size: 12px; margin-bottom: 14px; max-width: 60ch; }
-
     .toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
 
     button {
@@ -185,12 +181,6 @@
   </style>
 </head>
 <body>
-  <h1>Broken Component Repair</h1>
-  <p class="sub">
-    Zoekt component-copies waarvan de library-verwijzing weg is en koppelt ze opnieuw aan een component
-    met dezelfde naam, via Penpots eigen component-swap. Je laagnaam, formaat en variant blijven staan.
-  </p>
-
   <div class="toolbar">
     <button id="scan" type="button">Scannen</button>
     <button id="repair" type="button" disabled>Herstel selectie</button>
@@ -553,7 +543,6 @@
       choices: Object.fromEntries(choices),
     });
   });
-
 
   scopeSelect.addEventListener("change", () => {
     setStatus("Bereik gewijzigd. Scan opnieuw om de lijst te verversen.");
