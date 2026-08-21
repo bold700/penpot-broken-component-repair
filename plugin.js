@@ -469,7 +469,7 @@ function restoreVariant(shape, component, wanted) {
 // ---------------------------------------------------------------- overrides
 //
 // A swap can rewrite the layer name and the size. Those belong to the user, not
-// to the component, so they are put back. Fills and text are left to Penpot's
+// to the component, so they are put back. Fills and strokes are left to Penpot's
 // own override preservation: with the old main component gone there is no way to
 // tell an override apart from something that was simply inherited.
 
@@ -530,6 +530,80 @@ function restoreShape(shape, before) {
   return { restored, failed };
 }
 
+// -------------------------------------------------------------------- text
+//
+// The main says "label text" and the copy on the board says "Opslaan als".
+// That is the whole point of the copy, and a swap pulls the new main's words
+// in over it. So the typed text is read out of the subtree before the swap and
+// written back after, matched on the layer name and, when that is ambiguous or
+// gone, on the position in the tree.
+
+const MAX_DEPTH = 20;
+
+function childrenOf(shape) {
+  const children = safeRead(() => shape.children);
+  return Array.isArray(children) ? children : [];
+}
+
+/** Visits the shape and everything under it with a name path and an index path. */
+function walkShapes(root, visit) {
+  const step = (shape, namePath, indexPath, depth) => {
+    visit(shape, namePath, indexPath);
+    if (depth >= MAX_DEPTH) return;
+
+    childrenOf(shape).forEach((child, position) => {
+      const name = safeRead(() => child.name) || '';
+      step(child, namePath + '/' + name, indexPath + '/' + position, depth + 1);
+    });
+  };
+
+  step(root, '', '', 0);
+}
+
+function captureText(root) {
+  const byName = new Map();
+  const byIndex = new Map();
+  const ambiguous = new Set();
+
+  walkShapes(root, (shape, namePath, indexPath) => {
+    const characters = safeRead(() => shape.characters);
+    if (typeof characters !== 'string') return;
+
+    // Two text layers with the same name are not tellable apart by name.
+    if (byName.has(namePath)) ambiguous.add(namePath);
+    else byName.set(namePath, characters);
+
+    byIndex.set(indexPath, characters);
+  });
+
+  return { byName, byIndex, ambiguous };
+}
+
+function restoreText(root, before) {
+  const restored = [];
+  const failed = [];
+
+  walkShapes(root, (shape, namePath, indexPath) => {
+    const current = safeRead(() => shape.characters);
+    if (typeof current !== 'string') return;
+
+    const wanted = before.ambiguous.has(namePath) || !before.byName.has(namePath)
+      ? before.byIndex.get(indexPath)
+      : before.byName.get(namePath);
+
+    if (typeof wanted !== 'string' || wanted === current) return;
+
+    try {
+      shape.characters = wanted;
+      restored.push(safeRead(() => shape.name) || '(naamloos)');
+    } catch (e) {
+      failed.push('tekst "' + (safeRead(() => shape.name) || '') + '": ' + e.message);
+    }
+  });
+
+  return { restored, failed };
+}
+
 function scanPayload(scope) {
   const { items, diagnostics } = scan(scope);
 
@@ -573,6 +647,7 @@ function repair(request) {
         // Everything the user owns is read before the swap and put back after,
         // because a swap rewrites the layer name and can resize the copy.
         const before = captureShape(shape);
+        const beforeText = captureText(shape);
         // What the user picked in the panel wins. Only when nothing was picked
         // do we fall back to what could be read off the broken copy.
         const chosenVariant = (request.variants || {})[shapeId];
@@ -584,14 +659,19 @@ function repair(request) {
 
         const variant = restoreVariant(shape, component, wantedVariant);
         const shapeRestore = restoreShape(shape, before);
+        // After the variant, because switching variant swaps the subtree again.
+        const textRestore = restoreText(shape, beforeText);
 
         fixed++;
         details.push({
           id: shapeId,
           name: before.name,
           restored: shapeRestore.restored,
+          text: textRestore.restored,
           variant: variant ? variant.applied : [],
-          failed: shapeRestore.failed.concat(variant ? variant.failed : []),
+          failed: shapeRestore.failed
+            .concat(textRestore.failed)
+            .concat(variant ? variant.failed : []),
         });
       } catch (e) {
         failures.push({ id: shapeId, message: e.message });

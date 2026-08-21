@@ -566,6 +566,12 @@
       if (detail.variant && detail.variant.length) parts.push("variant " + detail.variant.join(", "));
       const props = (detail.restored || []).map(key => LABELS[key] || key);
       if (props.length) parts.push(props.join(", "));
+      const text = detail.text || [];
+      if (text.length) {
+        parts.push("tekst in " + (text.length > 3
+          ? `${text.slice(0, 3).join(", ")} +${text.length - 3}`
+          : text.join(", ")));
+      }
       if (detail.failed && detail.failed.length) parts.push("mislukt: " + detail.failed.join(" | "));
 
       kept.textContent = parts.length ? parts.join(" · ") : "niets hoefde hersteld te worden";

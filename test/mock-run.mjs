@@ -647,5 +647,106 @@ console.log("\na library that lists a variant set as one component");
   });
 }
 
+console.log("\ntext the user typed over");
+
+// ------------------------------------------------- text the user typed over
+//
+// The main component says "label text". The instance on the board says
+// "Opslaan als". A swap pulls the main's words back in, so the plugin has to
+// read the copy's text first and write it back after.
+{
+  const text = (name, characters) => ({ name, characters, children: [] });
+
+  const btn = { id: "c-btn", libraryId: "lib-local", path: "", name: "Button" };
+  const lib = { id: "lib-local", name: "Local library", components: [btn] };
+
+  // What the new main brings with it, wiping whatever the copy said.
+  const fromMain = () => [
+    text("label text", "label text"),
+    { name: "Groep", children: [text("helper", "helper text")] },
+    text("regel", "Regel"),
+    text("regel", "Regel"),
+  ];
+
+  const broken = {
+    id: "s-btn",
+    name: "Button",
+    parent: null,
+    x: 0, y: 0, width: 100, height: 40,
+    isComponentMainInstance: () => false,
+    isComponentCopyInstance: () => true,
+    component: () => null,
+    children: [
+      text("label text", "Opslaan als"),
+      { name: "Groep", children: [text("helper", "Eigen hint")] },
+      text("regel", "Een"),
+      text("regel", "Twee"),
+    ],
+    swapComponent(component) {
+      this.name = component.name;
+      this.children = fromMain();
+    },
+    switchVariant() {},
+    resize() {},
+  };
+
+  const page = { id: "tp", name: "Page 1", findShapes: () => [broken] };
+  const messages = [];
+  let handler = () => {};
+
+  globalThis.penpot = {
+    theme: "light",
+    selection: [],
+    currentPage: page,
+    currentFile: { id: "tf", pages: [page] },
+    library: { local: lib, connected: [] },
+    history: { undoBlockBegin: () => Symbol("b"), undoBlockFinish: () => {} },
+    viewport: { zoomIntoView: () => {} },
+    on: () => {},
+    closePlugin: () => {},
+    ui: {
+      open: () => {},
+      sendMessage: (message) => messages.push(message),
+      onMessage: (callback) => { handler = callback; },
+    },
+  };
+
+  new Function(source)();
+  handler({ type: "scan", scope: "file" });
+  const scan = [...messages].reverse().find((m) => m.type === "scan-result");
+  const item = scan.items[0];
+
+  handler({ type: "repair", scope: "file", choices: { "s-btn": item.matches[0].key } });
+  const repaired = [...messages].reverse().find((m) => m.type === "repair-result");
+  const detail = repaired.details[0];
+
+  check("the words the user typed survive the swap", () => {
+    assert.equal(broken.children[0].characters, "Opslaan als");
+  });
+
+  check("text deeper in the copy survives too", () => {
+    assert.equal(broken.children[1].children[0].characters, "Eigen hint");
+  });
+
+  check("two layers with the same name are matched on position", () => {
+    assert.equal(broken.children[2].characters, "Een");
+    assert.equal(broken.children[3].characters, "Twee");
+  });
+
+  check("the panel is told which layers got their text back", () => {
+    assert.deepEqual(detail.text, ["label text", "helper", "regel", "regel"]);
+    assert.deepEqual(detail.failed, []);
+  });
+
+  check("text that already matches is left alone", () => {
+    const untouched = { name: "x", characters: "same", children: [] };
+    broken.children = [untouched];
+    broken.swapComponent = function () { this.children = [{ name: "x", characters: "same", children: [] }]; };
+    handler({ type: "repair", scope: "file", choices: { "s-btn": item.matches[0].key } });
+    const again = [...messages].reverse().find((m) => m.type === "repair-result");
+    assert.deepEqual(again.details[0].text, []);
+  });
+}
+
 console.log(failures === 0 ? "\nAll checks passed.\n" : `\n${failures} check(s) failed.\n`);
 process.exit(failures === 0 ? 0 : 1);
