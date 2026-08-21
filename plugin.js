@@ -619,9 +619,11 @@ function selectShape(shapeId) {
   penpot.viewport.zoomIntoView([shape]);
 }
 
+// The panel is a list and a button, not a workspace. Penpot lets the user
+// drag it bigger when a scan turns up a lot.
 penpot.ui.open('Broken Component Repair', `?theme=${penpot.theme}`, {
-  width: 560,
-  height: 700,
+  width: 420,
+  height: 560,
 });
 
 try {
