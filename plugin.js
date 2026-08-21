@@ -691,6 +691,82 @@ function repair(request) {
   });
 }
 
+// ------------------------------------------------------------------ reveal
+//
+// A match is a name in a list until you have seen it. Penpot can jump to a
+// component's main instance, but only inside the file that holds it: there is
+// no API for opening another file, so a component from a connected library can
+// be named but not navigated to.
+
+function pageHolding(shapeId) {
+  const pages = safeRead(() => penpot.currentFile.pages) || [];
+  return pages.find(page => safeRead(() => page.getShapeById(shapeId))) || null;
+}
+
+function revealComponent(matchKey) {
+  const done = (ok, message) => penpot.ui.sendMessage({ type: 'reveal-result', ok, message });
+
+  const component = componentCache.get(matchKey);
+  if (!component) {
+    done(false, 'Dit component zit niet meer in de laatste scan. Scan opnieuw.');
+    return;
+  }
+
+  const label = joinPath(component.path || '', component.name);
+
+  let main = null;
+  try {
+    main = typeof component.mainInstance === 'function' ? component.mainInstance() : null;
+  } catch (e) {
+    done(false, 'Penpot geeft het hoofdcomponent van "' + label + '" niet vrij: ' + e.message);
+    return;
+  }
+
+  const elsewhere = '"' + label + '" staat in een ander bestand. Open die library zelf, een plugin kan niet buiten dit bestand navigeren.';
+
+  if (!main) {
+    done(false, elsewhere);
+    return;
+  }
+
+  const page = pageHolding(main.id);
+  if (!page) {
+    done(false, elsewhere);
+    return;
+  }
+
+  const focus = () => {
+    try {
+      penpot.selection = [main];
+      safeRead(() => penpot.viewport.zoomIntoView([main]));
+      done(true, '"' + label + '" staat geselecteerd op ' + page.name + '.');
+    } catch (e) {
+      done(false, 'Kon "' + label + '" niet selecteren: ' + e.message);
+    }
+  };
+
+  if (page.id === safeRead(() => penpot.currentPage.id)) {
+    focus();
+    return;
+  }
+
+  if (typeof penpot.openPage !== 'function') {
+    done(false, '"' + label + '" staat op pagina ' + page.name + '. Deze Penpot laat een plugin niet van pagina wisselen.');
+    return;
+  }
+
+  try {
+    const opening = penpot.openPage(page);
+    if (opening && typeof opening.then === 'function') {
+      opening.then(focus, e => done(false, 'Kon pagina ' + page.name + ' niet openen: ' + e.message));
+    } else {
+      focus();
+    }
+  } catch (e) {
+    done(false, 'Kon pagina ' + page.name + ' niet openen: ' + e.message);
+  }
+}
+
 function selectShape(shapeId) {
   const shape = shapeCache.get(shapeId);
   if (!shape) return;
@@ -767,6 +843,11 @@ penpot.ui.onMessage(msg => {
 
     if (msg.type === 'repair') {
       repair(msg);
+      return;
+    }
+
+    if (msg.type === 'reveal') {
+      revealComponent(msg.key);
       return;
     }
 

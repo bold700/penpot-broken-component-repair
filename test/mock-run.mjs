@@ -748,5 +748,107 @@ console.log("\ntext the user typed over");
   });
 }
 
+console.log("\ngoing to the component");
+
+// ------------------------------------------------------- going to a component
+//
+// Penpot can select a component's main instance, but only in the file that
+// holds it. A component from a connected library gets named, not visited.
+{
+  const mainShape = { id: "m-kaart", name: "Kaart" };
+
+  const localComponent = {
+    id: "c-kaart", libraryId: "lib-local", path: "", name: "Kaart",
+    mainInstance: () => mainShape,
+  };
+  const externalComponent = {
+    id: "c-kaart-ext", libraryId: "lib-ext", path: "", name: "Kaart",
+    mainInstance: () => null,
+  };
+
+  const broken = {
+    id: "s-kaart",
+    name: "Kaart",
+    parent: null,
+    x: 0, y: 0, width: 10, height: 10,
+    isComponentMainInstance: () => false,
+    isComponentCopyInstance: () => true,
+    component: () => null,
+    swapComponent() {},
+    switchVariant() {},
+    resize() {},
+  };
+
+  const page1 = {
+    id: "p1", name: "Page 1",
+    findShapes: () => [broken],
+    getShapeById: (id) => (id === "s-kaart" ? broken : null),
+  };
+  const page2 = {
+    id: "p2", name: "Main components",
+    findShapes: () => [],
+    getShapeById: (id) => (id === "m-kaart" ? mainShape : null),
+  };
+
+  const opened = [];
+  const messages = [];
+  let handler = () => {};
+
+  globalThis.penpot = {
+    theme: "light",
+    selection: [],
+    currentPage: page1,
+    currentFile: { id: "rf", pages: [page1, page2] },
+    library: {
+      local: { id: "lib-local", name: "Local library", components: [localComponent] },
+      connected: [{ id: "lib-ext", name: "Extern", components: [externalComponent] }],
+    },
+    history: { undoBlockBegin: () => Symbol("b"), undoBlockFinish: () => {} },
+    viewport: { zoomIntoView: () => {} },
+    openPage: (page) => { opened.push(page.name); return Promise.resolve(); },
+    on: () => {},
+    closePlugin: () => {},
+    ui: {
+      open: () => {},
+      sendMessage: (message) => messages.push(message),
+      onMessage: (callback) => { handler = callback; },
+    },
+  };
+
+  new Function(source)();
+  handler({ type: "scan", scope: "file" });
+  const scan = [...messages].reverse().find((m) => m.type === "scan-result");
+  const item = scan.items[0];
+  const localMatch = item.matches.find((m) => m.isLocal);
+  const externalMatch = item.matches.find((m) => !m.isLocal);
+
+  handler({ type: "reveal", key: localMatch.key });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const wentTo = [...messages].reverse().find((m) => m.type === "reveal-result");
+
+  check("it opens the page the main component sits on", () => {
+    assert.deepEqual(opened, ["Main components"]);
+    assert.deepEqual(penpot.selection, [mainShape]);
+    assert.equal(wentTo.ok, true);
+  });
+
+  handler({ type: "reveal", key: externalMatch.key });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const refused = [...messages].reverse().find((m) => m.type === "reveal-result");
+
+  check("a component in another file is named, not visited", () => {
+    assert.equal(refused.ok, false);
+    assert.match(refused.message, /ander bestand/);
+    assert.deepEqual(opened, ["Main components"]);
+  });
+
+  check("a key that is no longer in the scan says so", () => {
+    handler({ type: "reveal", key: "lib-local:weg" });
+    const stale = [...messages].reverse().find((m) => m.type === "reveal-result");
+    assert.equal(stale.ok, false);
+    assert.match(stale.message, /Scan opnieuw/);
+  });
+}
+
 console.log(failures === 0 ? "\nAll checks passed.\n" : `\n${failures} check(s) failed.\n`);
 process.exit(failures === 0 ? 0 : 1);
