@@ -842,6 +842,11 @@ console.log("\ngoing to the component");
     assert.deepEqual(opened, ["Main components"]);
   });
 
+  check("every match carries the component id the workspace URL needs", () => {
+    assert.equal(localMatch.componentId, "c-kaart");
+    assert.equal(externalMatch.componentId, "c-kaart-ext");
+  });
+
   check("a key that is no longer in the scan says so", () => {
     handler({ type: "reveal", key: "lib-local:weg" });
     const stale = [...messages].reverse().find((m) => m.type === "reveal-result");

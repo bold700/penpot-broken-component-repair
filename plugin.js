@@ -57,6 +57,9 @@ function buildLibraryIndex() {
 
       const match = {
         key,
+        // Penpot's own workspace URL selects a main instance by component id,
+        // which is how the panel can link into another file.
+        componentId: component.id,
         libraryId: library.id,
         libraryName: library.name,
         isLocal: library.id === local.id,
@@ -86,7 +89,7 @@ function buildLibraryIndex() {
           const memberKey = library.id + ':' + member.id;
           componentCache.set(memberKey, member);
           const props = memberVariantProps(member);
-          return { key: memberKey, label: variantLabel(props, member.name), props };
+          return { key: memberKey, componentId: member.id, label: variantLabel(props, member.name), props };
         });
 
         for (const name of containerNames(match, members)) pushMatch(byContainer, name, match);
@@ -111,6 +114,7 @@ function buildLibraryIndex() {
       const head = group[0];
       head.variants = group.map(member => ({
         key: member.key,
+        componentId: member.componentId,
         label: variantLabel(member.variantProps, member.name),
         props: member.variantProps,
       }));

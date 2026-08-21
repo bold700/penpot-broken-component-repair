@@ -273,10 +273,12 @@
     document.documentElement.dataset.theme = theme === "dark" ? "dark" : "light";
   }
 
-  // Penpot's own assets panel opens a shared library by navigating the app to
-  // that file. The Plugin API has no call for it, but the address is just a
-  // URL: same origin, same team, other file id. The team id is not in the API,
-  // so it is read off whatever URL we are allowed to see.
+  // Penpot's own assets panel opens a shared library on a double click by
+  // navigating the app to a URL, not through the Plugin API. It hands the
+  // workspace route the library's file id plus component-id, and the workspace
+  // then selects that component's main instance and zooms to it. The panel
+  // builds the same URL. Only the team id is missing from the API, so it is
+  // read off whatever address we are allowed to see.
   let penpotAddress = null;
 
   function readPenpotAddress(...candidates) {
@@ -297,9 +299,12 @@
     return null;
   }
 
-  function libraryUrl(libraryId) {
-    return `${penpotAddress.origin}/#/workspace?team-id=${encodeURIComponent(penpotAddress.team)}` +
+  function componentUrl(libraryId, componentId) {
+    const url = `${penpotAddress.origin}/#/workspace?team-id=${encodeURIComponent(penpotAddress.team)}` +
       `&file-id=${encodeURIComponent(libraryId)}`;
+    // Without a component id this only opens the file. With one, Penpot picks
+    // the right page itself and selects the main instance.
+    return componentId ? `${url}&component-id=${encodeURIComponent(componentId)}` : url;
   }
 
   function label(match) {
@@ -449,6 +454,7 @@
       picker.addEventListener("change", () => {
         choices.set(item.id, picker.value);
         warn.hidden = true;
+        updateReveal();
       });
 
       const pickerLabel = document.createElement("label");
@@ -490,6 +496,14 @@
 
     const pickedMatch = () => item.matches.find(match => match.key === select.value) || null;
 
+    // A picked variant is its own component, so the link lands on that variant
+    // and not on the container it belongs to.
+    function pickedComponentId(match) {
+      const chosen = choices.get(item.id);
+      const variant = (match.variants || []).find(entry => entry.key === chosen);
+      return (variant && variant.componentId) || match.componentId;
+    }
+
     function updateReveal() {
       const match = pickedMatch();
       reveal.classList.toggle("off", !match || (!match.isLocal && !penpotAddress));
@@ -502,10 +516,10 @@
       } else if (match.isLocal) {
         reveal.title = "Ga naar dit component";
       } else if (penpotAddress) {
-        reveal.href = libraryUrl(match.libraryId);
+        reveal.href = componentUrl(match.libraryId, pickedComponentId(match));
         reveal.target = "_blank";
         reveal.rel = "noopener";
-        reveal.title = `Open ${match.libraryName} in een nieuw tabblad`;
+        reveal.title = `Open dit component in ${match.libraryName}`;
       } else {
         reveal.title = `${match.libraryName} is een ander bestand`;
       }
@@ -537,13 +551,15 @@
       }
 
       // A real link with a real href. Penpot opens it in a new tab itself.
-      setStatus(`${match.libraryName} wordt in een nieuw tabblad geopend.`);
+      setStatus(`Het originele component wordt geopend in ${match.libraryName}.`);
     });
 
     updateReveal();
     choice.append(selectLabel, select, reveal);
     row.append(choice, variantBox);
     renderVariantPicker();
+    // After the variant picker, which decides which component the link opens.
+    updateReveal();
     return row;
   }
 
