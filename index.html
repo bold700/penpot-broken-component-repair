@@ -166,29 +166,6 @@
     .go svg { color: var(--muted); }
     .go-row { display: flex; justify-content: flex-end; }
 
-    #address {
-      display: grid;
-      gap: 6px;
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      background: var(--surface);
-      padding: 10px;
-      margin-bottom: 10px;
-    }
-    #address p { margin: 0; font-size: 11px; color: var(--muted); }
-    #address .row { display: flex; gap: 6px; }
-    #address input {
-      flex: 1;
-      min-width: 0;
-      font: inherit;
-      font-size: 12px;
-      color: var(--fg);
-      background: var(--bg);
-      border: 1px solid var(--line);
-      border-radius: 6px;
-      padding: 5px 8px;
-      min-height: 30px;
-    }
     .info[aria-expanded="true"] { color: var(--accent); }
 
     .details { display: grid; gap: 4px; }
@@ -247,19 +224,6 @@
   </div>
 
   <div id="scroll">
-    <form id="address" hidden>
-      <p>
-        Om naar een library te kunnen springen heb ik het adres van deze Penpot nodig,
-        en dat mag een plugin niet zelf uitlezen. Plak het adres van je Penpot-tabblad,
-        dan onthoud ik het.
-      </p>
-      <div class="row">
-        <input id="addressInput" type="url" spellcheck="false"
-               placeholder="https://design.penpot.app/#/workspace?team-id=…" />
-        <button type="submit">Bewaren</button>
-      </div>
-    </form>
-
     <div id="summary" hidden></div>
     <div id="status" role="status" aria-live="polite" hidden></div>
     <div id="lastRepair"></div>
@@ -291,8 +255,6 @@
   const resultsBox = el("results");
   const lastRepairBox = el("lastRepair");
   const diagnosticsList = el("diagnostics");
-  const addressForm = el("address");
-  const addressInput = el("addressInput");
 
   /** shape id -> chosen library component key */
   const choices = new Map();
@@ -328,84 +290,6 @@
 
   function applyTheme(theme) {
     document.documentElement.dataset.theme = theme === "dark" ? "dark" : "light";
-  }
-
-  // Penpot's own assets panel opens a shared library on a double click by
-  // navigating the app to a URL, not through the Plugin API. It hands the
-  // workspace route the library's file id plus component-id, and the workspace
-  // then selects that component's main instance and zooms to it. The panel
-  // builds the same URL. Only the team id is missing from the API, so it is
-  // read off whatever address we are allowed to see.
-  let penpotAddress = null;
-
-  function readPenpotAddress(...candidates) {
-    for (const candidate of candidates) {
-      if (!candidate) continue;
-      try {
-        const url = new URL(candidate, window.location.href);
-        if (url.protocol !== "http:" && url.protocol !== "https:") continue;
-
-        const hash = url.hash || "";
-        const query = hash.includes("?") ? hash.slice(hash.indexOf("?") + 1) : url.search.slice(1);
-        const team = new URLSearchParams(query).get("team-id");
-        if (team) return { origin: url.origin, team };
-      } catch (e) {
-        // not a usable URL, try the next one
-      }
-    }
-    return null;
-  }
-
-  const ADDRESS_KEY = "penpot-address";
-
-  // Every reveal control registers here, so saving the address updates the
-  // whole list without re-rendering it and throwing away the user's choices.
-  const revealUpdaters = [];
-
-  function readStoredAddress() {
-    try {
-      return window.localStorage.getItem(ADDRESS_KEY);
-    } catch (e) {
-      return null;
-    }
-  }
-
-  function storeAddress(value) {
-    try {
-      window.localStorage.setItem(ADDRESS_KEY, value);
-    } catch (e) {
-      // A browser that refuses storage still works, it just asks again.
-    }
-  }
-
-  function askForAddress() {
-    addressForm.hidden = false;
-    addressInput.focus();
-  }
-
-  addressForm.addEventListener("submit", event => {
-    event.preventDefault();
-
-    const parsed = readPenpotAddress(addressInput.value.trim());
-    if (!parsed) {
-      setStatus("Daar staat geen team-id in. Kopieer het hele adres uit de adresbalk van je Penpot-tabblad.", "error");
-      return;
-    }
-
-    penpotAddress = parsed;
-    storeAddress(addressInput.value.trim());
-    addressForm.hidden = true;
-    addressInput.value = "";
-    for (const update of revealUpdaters) update();
-    setStatus(`Adres bewaard. Libraries openen nu in een nieuw tabblad.`, "ok");
-  });
-
-  function componentUrl(libraryId, componentId) {
-    const url = `${penpotAddress.origin}/#/workspace?team-id=${encodeURIComponent(penpotAddress.team)}` +
-      `&file-id=${encodeURIComponent(libraryId)}`;
-    // Without a component id this only opens the file. With one, Penpot picks
-    // the right page itself and selects the main instance.
-    return componentId ? `${url}&component-id=${encodeURIComponent(componentId)}` : url;
   }
 
   function label(match) {
@@ -588,75 +472,26 @@
     selectLabel.htmlFor = select.id;
     selectLabel.textContent = "Koppel aan";
 
-    // A name in a dropdown says little. In this file the canvas jumps to the
-    // component itself, variant and all. In another file it is a link that
-    // opens that library on the component, the way the assets panel does.
-    const reveal = document.createElement("a");
+    // Only for a component in this file. Penpot can select a main instance,
+    // but a plugin cannot open another file and cannot find out the address of
+    // one either, so there is nothing to offer for a library component.
+    const reveal = document.createElement("button");
+    reveal.type = "button";
     reveal.className = "go";
-    const revealText = document.createElement("span");
+    reveal.title = "Selecteer het hoofdcomponent op de canvas";
     reveal.innerHTML = REVEAL_ICON;
-    reveal.append(revealText);
+    reveal.append(document.createTextNode("Ga naar component"));
 
     const pickedMatch = () => item.matches.find(match => match.key === select.value) || null;
 
-    // A picked variant is its own component, so the link lands on that variant
-    // and not on the container it belongs to.
-    function pickedComponentId(match) {
-      const chosen = choices.get(item.id);
-      const variant = (match.variants || []).find(entry => entry.key === chosen);
-      return (variant && variant.componentId) || match.componentId;
-    }
-
     function updateReveal() {
       const match = pickedMatch();
-      reveal.hidden = !match;
-      reveal.removeAttribute("target");
-      reveal.removeAttribute("rel");
-      reveal.href = "#";
-
-      if (!match) return;
-
-      if (match.isLocal) {
-        revealText.textContent = "Ga naar component";
-        reveal.title = "Selecteer het hoofdcomponent op de canvas";
-      } else if (penpotAddress) {
-        reveal.href = componentUrl(match.libraryId, pickedComponentId(match));
-        reveal.target = "_blank";
-        reveal.rel = "noopener";
-        revealText.textContent = "Bekijk origineel";
-        reveal.title = `Open dit component in ${match.libraryName}, in een nieuw tabblad`;
-      } else {
-        revealText.textContent = "Bekijk origineel";
-        reveal.title = `${match.libraryName} is een ander bestand`;
-      }
-
-      reveal.setAttribute("aria-label", reveal.title + " (" + revealText.textContent + ")");
+      reveal.hidden = !match || !match.isLocal;
     }
 
-    revealUpdaters.push(updateReveal);
-
-    reveal.addEventListener("click", event => {
+    reveal.addEventListener("click", () => {
       const match = pickedMatch();
-
-      if (!match) {
-        event.preventDefault();
-        return;
-      }
-
-      if (match.isLocal) {
-        event.preventDefault();
-        send({ type: "reveal", key: choices.get(item.id) || select.value });
-        return;
-      }
-
-      if (!penpotAddress) {
-        event.preventDefault();
-        askForAddress();
-        return;
-      }
-
-      // A real link with a real href. Penpot opens it in a new tab itself.
-      setStatus(`Het originele component wordt geopend in ${match.libraryName}.`);
+      if (match && match.isLocal) send({ type: "reveal", key: choices.get(item.id) || select.value });
     });
 
     updateReveal();
@@ -667,8 +502,6 @@
     goRow.append(reveal);
     row.append(choice, variantBox, goRow);
     renderVariantPicker();
-    // After the variant picker, which decides which component the link opens.
-    updateReveal();
     return row;
   }
 
@@ -693,10 +526,6 @@
       ["Component-copies", String(diagnostics.copyInstances)],
       ["Libraries", `${diagnostics.libraries} met ${plural(diagnostics.components, "component", "componenten")}`],
     ];
-
-    rows.push(["Andere library openen", penpotAddress
-      ? penpotAddress.origin
-      : "adres van deze Penpot nog onbekend"]);
 
     const errors = diagnostics.errors || [];
     if (diagnostics.copyInstances === 0 || errors.length) {
@@ -743,7 +572,6 @@
   function render(scan) {
     lastScan = scan;
     choices.clear();
-    revealUpdaters.length = 0;
 
     renderSummary(scan.counts);
 
@@ -848,7 +676,6 @@
       ["Lokale componenten", String(probe.localComponents)],
       ["Verbonden libraries", String(probe.connectedLibraries)],
     ];
-    rows.push(["Andere library openen", penpotAddress ? "kan, " + penpotAddress.origin : "adres van deze Penpot onbekend"]);
     if (notes && notes.length) rows.push(["Fouten", notes.join(" | ")]);
 
     diagnosticsList.innerHTML = "";
@@ -869,11 +696,6 @@
     switch (message.type) {
       case "hello":
         applyTheme(message.theme);
-        penpotAddress = readPenpotAddress(
-          readStoredAddress(),
-          message.probe && message.probe.href,
-          document.referrer,
-        );
         describeProbe(message.probe, message.notes);
         // Connected is the normal case. The Scan button says the rest.
         setStatus("");
