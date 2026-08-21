@@ -44,9 +44,10 @@
       color: var(--fg);
       font-size: 13px;
       line-height: 1.5;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
     }
-
-    .toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
 
     button {
       font: inherit;
@@ -72,9 +73,9 @@
       outline-offset: 2px;
     }
 
-    .scope { display: flex; align-items: center; gap: 6px; margin-left: auto; color: var(--muted); font-size: 12px; }
-    .scope select {
+    select {
       font: inherit;
+      font-size: 12px;
       color: var(--fg);
       background: var(--bg);
       border: 1px solid var(--line);
@@ -83,16 +84,20 @@
       min-height: 30px;
     }
 
-    .summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 10px; }
-    .stat { border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 10px; background: var(--surface); }
-    .stat b { display: block; font-size: 17px; letter-spacing: -0.02em; }
-    .stat span { font-size: 11px; color: var(--muted); }
+    /* One primary action. Everything else earns its place by being needed. */
+    .toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+    .toolbar select { margin-left: auto; }
 
-    #status { font-size: 12px; color: var(--muted); min-height: 20px; margin-bottom: 6px; }
+    #scroll { flex: 1; min-height: 0; overflow: auto; }
+
+    #summary { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+    #summary b { color: var(--fg); font-weight: 600; }
+
+    #status { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
     #status[data-tone="error"] { color: var(--bad); }
     #status[data-tone="ok"] { color: var(--ok); }
 
-    #results { max-height: 340px; overflow: auto; border-top: 1px solid var(--line); }
+    #results.list { border-top: 1px solid var(--line); }
 
     #lastRepair:not(:empty) {
       border: 1px solid var(--line);
@@ -140,32 +145,23 @@
     .badge.unresolved { color: var(--bad); }
 
     .choice { display: flex; align-items: center; gap: 6px; }
-    .choice select {
-      font: inherit;
-      font-size: 12px;
-      color: var(--fg);
-      background: var(--bg);
-      border: 1px solid var(--line);
-      border-radius: 6px;
-      padding: 5px 6px;
-      min-height: 30px;
-      flex: 1;
-      min-width: 0;
-    }
+    .choice select { flex: 1; min-width: 0; }
 
     .variants { display: grid; gap: 4px; padding-left: 12px; border-left: 2px solid var(--line); }
-    .variants .choice select { font-size: 12px; }
     .warn { color: var(--warn); }
 
-    .empty { padding: 24px 4px; text-align: center; }
-    .empty h2 { font-size: 13px; margin: 0 0 4px; letter-spacing: -0.01em; }
-    .empty p { color: var(--muted); font-size: 12px; margin: 0 auto 12px; max-width: 40ch; }
+    .empty { color: var(--muted); font-size: 12px; max-width: 46ch; padding: 4px 0 8px; }
 
     .diag { margin-top: 12px; font-size: 11px; color: var(--muted); }
     .diag summary { cursor: pointer; }
     .diag dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; margin: 8px 0 0; }
     .diag dt { color: var(--muted); }
     .diag dd { margin: 0; color: var(--fg); }
+
+    /* The repair action only exists once there is something to repair. */
+    #actions { display: flex; border-top: 1px solid var(--line); padding-top: 10px; margin-top: 10px; }
+    #actions[hidden] { display: none; }
+    #actions button { flex: 1; }
 
     .spinner {
       width: 13px; height: 13px; border-radius: 50%;
@@ -183,54 +179,44 @@
 <body>
   <div class="toolbar">
     <button id="scan" type="button">Scannen</button>
-    <button id="repair" type="button" disabled>Herstel selectie</button>
+    <select id="scope" aria-label="Bereik van de scan">
+      <option value="file">Hele bestand</option>
+      <option value="page">Huidige pagina</option>
+    </select>
+  </div>
 
-    <div class="scope">
-      <label for="scope">Bereik</label>
-      <select id="scope">
-        <option value="file">Hele bestand</option>
-        <option value="page">Huidige pagina</option>
-      </select>
+  <div id="scroll">
+    <div id="summary" hidden></div>
+    <div id="status" role="status" aria-live="polite" hidden></div>
+    <div id="lastRepair"></div>
+    <div id="results">
+      <p class="empty">Nog niet gescand. Klik Scannen om de component-copies in dit bestand te controleren.</p>
     </div>
+
+    <details class="diag">
+      <summary>Diagnose</summary>
+      <dl id="diagnostics">
+        <dt>Nog niet gescand</dt><dd>&nbsp;</dd>
+      </dl>
+    </details>
   </div>
 
-  <div class="summary">
-    <div class="stat"><b id="brokenCount">0</b><span>kapot</span></div>
-    <div class="stat"><b id="repairableCount">0</b><span>te herstellen</span></div>
-    <div class="stat"><b id="ambiguousCount">0</b><span>keuze nodig</span></div>
-    <div class="stat"><b id="unresolvedCount">0</b><span>geen match</span></div>
+  <div id="actions" hidden>
+    <button id="repair" type="button">Herstel selectie</button>
   </div>
-
-  <div id="status" role="status" aria-live="polite">Gereed.</div>
-
-  <div id="lastRepair"></div>
-
-  <div id="results"></div>
-
-  <details class="diag">
-    <summary>Diagnose</summary>
-    <dl id="diagnostics">
-      <dt>Nog niet gescand</dt><dd>&nbsp;</dd>
-    </dl>
-  </details>
 
   <script>
   const el = id => document.getElementById(id);
 
   const scanButton = el("scan");
   const repairButton = el("repair");
+  const actionsBar = el("actions");
   const scopeSelect = el("scope");
+  const summaryLine = el("summary");
   const statusLine = el("status");
   const resultsBox = el("results");
   const lastRepairBox = el("lastRepair");
   const diagnosticsList = el("diagnostics");
-
-  const counters = {
-    broken: el("brokenCount"),
-    repairable: el("repairableCount"),
-    ambiguous: el("ambiguousCount"),
-    unresolved: el("unresolvedCount"),
-  };
 
   /** shape id -> chosen library component key */
   const choices = new Map();
@@ -245,9 +231,17 @@
     window.parent.postMessage(message, "*");
   }
 
+  function plural(count, one, many) {
+    return `${count} ${count === 1 ? one : many}`;
+  }
+
+  // An empty status line is a hidden status line, so the panel does not reserve
+  // space for the word "Gereed".
   function setStatus(text, tone = "", busy = false) {
     statusLine.dataset.tone = tone;
     statusLine.innerHTML = "";
+    statusLine.hidden = !text;
+    if (!text) return;
     if (busy) {
       const spinner = document.createElement("span");
       spinner.className = "spinner";
@@ -271,11 +265,9 @@
       : "Verwijst naar een component in een library die niet meer verbonden is";
   }
 
-  function updateRepairButton() {
-    repairButton.disabled = choices.size === 0;
-    repairButton.textContent = choices.size
-      ? `Herstel ${choices.size} geselecteerd`
-      : "Herstel selectie";
+  function updateActions() {
+    actionsBar.hidden = choices.size === 0;
+    repairButton.textContent = `Herstel ${plural(choices.size, "component", "componenten")}`;
   }
 
   function buildItem(item) {
@@ -397,7 +389,7 @@
       if (select.value) choices.set(item.id, select.value);
       else choices.delete(item.id);
       renderVariantPicker();
-      updateRepairButton();
+      updateActions();
     });
 
     const selectLabel = document.createElement("label");
@@ -411,43 +403,37 @@
     return row;
   }
 
+  // Nothing broken is one sentence, not a heading plus a paragraph plus a
+  // button that repeats the one in the toolbar.
   function renderEmpty(scan) {
-    const empty = document.createElement("div");
+    const empty = document.createElement("p");
     empty.className = "empty";
-
-    const title = document.createElement("h2");
-    title.textContent = "Geen kapotte component-links gevonden";
-
-    const body = document.createElement("p");
-    body.textContent = scan.diagnostics.copyInstances === 0
-      ? `${scan.diagnostics.shapes} shapes op ${scan.diagnostics.pages} pagina('s) bekeken en geen enkele component-copy gevonden. Controleer het bereik, of klap de diagnose hieronder open.`
-      : `Alle ${scan.diagnostics.copyInstances} component-copies verwijzen naar een component in de lokale of een verbonden library.`;
-
-    const again = document.createElement("button");
-    again.type = "button";
-    again.className = "secondary";
-    again.textContent = "Opnieuw scannen";
-    again.addEventListener("click", () => startScan());
-
-    empty.append(title, body, again);
+    empty.textContent = scan.diagnostics.copyInstances === 0
+      ? `Geen component-copies gevonden op ${plural(scan.diagnostics.pages, "pagina", "pagina's")}, ${plural(scan.diagnostics.shapes, "shape", "shapes")} bekeken. Klopt het bereik?`
+      : `${plural(scan.diagnostics.copyInstances, "component-copy", "component-copies")} gecontroleerd, alles verwijst naar een bestaand component.`;
     resultsBox.append(empty);
   }
 
+  // Only what changes a decision. The rest is for the case where the scan finds
+  // nothing and you need to know why.
   function renderDiagnostics(diagnostics, scope) {
     const rows = [
       ["Scope", scope === "file" ? "Hele bestand" : "Huidige pagina"],
       ["Pagina's gescand", String(diagnostics.pages)],
       ["Shapes bekeken", String(diagnostics.shapes)],
       ["Component-copies", String(diagnostics.copyInstances)],
-      ["Kinderen in een copy (overgeslagen)", String(diagnostics.nested ?? 0)],
-      ["Main components op canvas", String(diagnostics.mainInstances)],
-      ["Libraries geïndexeerd", String(diagnostics.libraries)],
-      ["Library-componenten", String(diagnostics.components)],
-      ["Variant-containers", String(diagnostics.variants ?? 0)],
+      ["Libraries", `${diagnostics.libraries} met ${plural(diagnostics.components, "component", "componenten")}`],
     ];
-    if (diagnostics.errors && diagnostics.errors.length) {
-      rows.push(["Overgeslagen door fouten", diagnostics.errors.join(" | ")]);
+
+    const errors = diagnostics.errors || [];
+    if (diagnostics.copyInstances === 0 || errors.length) {
+      rows.push(
+        ["Kinderen in een copy (overgeslagen)", String(diagnostics.nested ?? 0)],
+        ["Main components op canvas", String(diagnostics.mainInstances)],
+        ["Variant-containers", String(diagnostics.variants ?? 0)],
+      );
     }
+    if (errors.length) rows.push(["Overgeslagen door fouten", errors.join(" | ")]);
 
     diagnosticsList.innerHTML = "";
     for (const [term, value] of rows) {
@@ -459,21 +445,41 @@
     }
   }
 
+  // "kapot" is the sum of the three others, so one line says what four tiles
+  // said, and only when there is something to say.
+  function renderSummary(counts) {
+    if (counts.broken === 0) {
+      summaryLine.hidden = true;
+      summaryLine.textContent = "";
+      return;
+    }
+
+    const parts = [];
+    if (counts.repairable) parts.push(`${counts.repairable} te herstellen`);
+    if (counts.ambiguous) parts.push(`${counts.ambiguous} keuze nodig`);
+    if (counts.unresolved) parts.push(`${counts.unresolved} geen match`);
+
+    summaryLine.hidden = false;
+    summaryLine.innerHTML = "";
+    const total = document.createElement("b");
+    total.textContent = `${plural(counts.broken, "kapotte copy", "kapotte copies")}`;
+    summaryLine.append(total);
+    if (parts.length) summaryLine.append(document.createTextNode(`: ${parts.join(", ")}`));
+  }
+
   function render(scan) {
     lastScan = scan;
     choices.clear();
 
-    counters.broken.textContent = String(scan.counts.broken);
-    counters.repairable.textContent = String(scan.counts.repairable);
-    counters.ambiguous.textContent = String(scan.counts.ambiguous);
-    counters.unresolved.textContent = String(scan.counts.unresolved);
+    renderSummary(scan.counts);
 
     resultsBox.innerHTML = "";
+    resultsBox.classList.toggle("list", scan.items.length > 0);
     if (scan.items.length === 0) renderEmpty(scan);
     else for (const item of scan.items) resultsBox.append(buildItem(item));
 
     renderDiagnostics(scan.diagnostics, scan.scope);
-    updateRepairButton();
+    updateActions();
   }
 
   const LABELS = {
@@ -524,7 +530,7 @@
 
   function startScan() {
     scanButton.disabled = true;
-    repairButton.disabled = true;
+    actionsBar.hidden = true;
     lastRepairBox.innerHTML = "";
     setStatus("Scannen…", "", true);
     send({ type: "scan", scope: scopeSelect.value });
@@ -535,8 +541,8 @@
   repairButton.addEventListener("click", () => {
     if (choices.size === 0) return;
     scanButton.disabled = true;
-    repairButton.disabled = true;
-    setStatus(`${choices.size} component(en) herstellen…`, "", true);
+    actionsBar.hidden = true;
+    setStatus(`${plural(choices.size, "component", "componenten")} herstellen…`, "", true);
     send({
       type: "repair",
       scope: (lastScan && lastScan.scope) || scopeSelect.value,
@@ -544,9 +550,9 @@
     });
   });
 
-  scopeSelect.addEventListener("change", () => {
-    setStatus("Bereik gewijzigd. Scan opnieuw om de lijst te verversen.");
-  });
+  // Changing the scope is the request. Asking for a second click to honour it
+  // is the panel making the user press its own button.
+  scopeSelect.addEventListener("change", startScan);
 
   let connected = false;
 
@@ -554,7 +560,7 @@
     const rows = [
       ["Sandbox", "verbonden"],
       ["Huidige pagina", probe.currentPage ? "ja" : "nee"],
-      ["Bestand leesbaar", probe.currentFile ? `ja, ${probe.pages} pagina(s)` : "nee"],
+      ["Bestand leesbaar", probe.currentFile ? `ja, ${plural(probe.pages, "pagina", "pagina's")}` : "nee"],
       ["findShapes()", probe.findShapes ? "werkt" : "faalt"],
       ["isComponentCopyInstance()", probe.isComponentCopyInstance ? "aanwezig" : "niet gevonden"],
       ["swapComponent()", probe.swapComponent ? "aanwezig" : "niet gevonden"],
@@ -583,7 +589,8 @@
       case "hello":
         applyTheme(message.theme);
         describeProbe(message.probe, message.notes);
-        setStatus("Verbonden met Penpot. Klik Scan.", "ok");
+        // Connected is the normal case. The Scan button says the rest.
+        setStatus("");
         return;
 
       case "theme":
@@ -593,12 +600,9 @@
       case "scan-result":
         scanButton.disabled = false;
         render(message);
-        setStatus(
-          message.counts.broken === 0
-            ? "Scan klaar. Niets kapot."
-            : `Scan klaar: ${message.counts.broken} kapotte copy(s), ${message.counts.repairable} met precies één match.`,
-          message.counts.broken === 0 ? "ok" : "",
-        );
+        // The summary line and the empty state already say what the scan
+        // found, so a second sentence here would only repeat them.
+        setStatus("");
         return;
 
       case "repair-result": {
