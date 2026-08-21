@@ -2,6 +2,7 @@
 """Serves the plugin with CORS headers so Penpot can load the manifest."""
 import http.server
 import os
+import socket
 import sys
 
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 7782
@@ -33,5 +34,25 @@ class CORSHandler(http.server.SimpleHTTPRequestHandler):
         pass
 
 
+class DualStackServer(http.server.ThreadingHTTPServer):
+    """Chromium resolves localhost to ::1 before it tries 127.0.0.1, so an
+    IPv4-only bind answers curl fine and refuses the browser outright."""
+
+    address_family = socket.AF_INET6
+    daemon_threads = True
+
+    def server_bind(self):
+        self.socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+        return super().server_bind()
+
+
+def serve():
+    try:
+        return DualStackServer(("::", PORT), CORSHandler)
+    except OSError:
+        # A host without IPv6 still deserves a working server.
+        return http.server.ThreadingHTTPServer(("", PORT), CORSHandler)
+
+
 print(f"Broken Component Repair: http://localhost:{PORT}/manifest.json")
-http.server.HTTPServer(("", PORT), CORSHandler).serve_forever()
+serve().serve_forever()
