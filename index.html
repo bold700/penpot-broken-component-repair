@@ -145,8 +145,50 @@
       transition: color 0.15s ease;
     }
     .icon:hover:not(:disabled) { color: var(--fg); opacity: 1; }
-    a.icon { display: inline-flex; text-decoration: none; }
-    a.icon.off { opacity: 0.5; cursor: not-allowed; }
+    .go {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 4px 9px;
+      min-height: 26px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: transparent;
+      color: var(--fg);
+      text-decoration: none;
+      cursor: pointer;
+      transition: background 0.15s ease, border-color 0.15s ease;
+    }
+    .go:hover { background: var(--surface); border-color: var(--muted); }
+    .go:active { transform: scale(0.98); }
+    .go svg { color: var(--muted); }
+    .go-row { display: flex; justify-content: flex-end; }
+
+    #address {
+      display: grid;
+      gap: 6px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      padding: 10px;
+      margin-bottom: 10px;
+    }
+    #address p { margin: 0; font-size: 11px; color: var(--muted); }
+    #address .row { display: flex; gap: 6px; }
+    #address input {
+      flex: 1;
+      min-width: 0;
+      font: inherit;
+      font-size: 12px;
+      color: var(--fg);
+      background: var(--bg);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 5px 8px;
+      min-height: 30px;
+    }
     .info[aria-expanded="true"] { color: var(--accent); }
 
     .details { display: grid; gap: 4px; }
@@ -205,6 +247,19 @@
   </div>
 
   <div id="scroll">
+    <form id="address" hidden>
+      <p>
+        Om naar een library te kunnen springen heb ik het adres van deze Penpot nodig,
+        en dat mag een plugin niet zelf uitlezen. Plak het adres van je Penpot-tabblad,
+        dan onthoud ik het.
+      </p>
+      <div class="row">
+        <input id="addressInput" type="url" spellcheck="false"
+               placeholder="https://design.penpot.app/#/workspace?team-id=…" />
+        <button type="submit">Bewaren</button>
+      </div>
+    </form>
+
     <div id="summary" hidden></div>
     <div id="status" role="status" aria-live="polite" hidden></div>
     <div id="lastRepair"></div>
@@ -236,6 +291,8 @@
   const resultsBox = el("results");
   const lastRepairBox = el("lastRepair");
   const diagnosticsList = el("diagnostics");
+  const addressForm = el("address");
+  const addressInput = el("addressInput");
 
   /** shape id -> chosen library component key */
   const choices = new Map();
@@ -298,6 +355,50 @@
     }
     return null;
   }
+
+  const ADDRESS_KEY = "penpot-address";
+
+  // Every reveal control registers here, so saving the address updates the
+  // whole list without re-rendering it and throwing away the user's choices.
+  const revealUpdaters = [];
+
+  function readStoredAddress() {
+    try {
+      return window.localStorage.getItem(ADDRESS_KEY);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function storeAddress(value) {
+    try {
+      window.localStorage.setItem(ADDRESS_KEY, value);
+    } catch (e) {
+      // A browser that refuses storage still works, it just asks again.
+    }
+  }
+
+  function askForAddress() {
+    addressForm.hidden = false;
+    addressInput.focus();
+  }
+
+  addressForm.addEventListener("submit", event => {
+    event.preventDefault();
+
+    const parsed = readPenpotAddress(addressInput.value.trim());
+    if (!parsed) {
+      setStatus("Daar staat geen team-id in. Kopieer het hele adres uit de adresbalk van je Penpot-tabblad.", "error");
+      return;
+    }
+
+    penpotAddress = parsed;
+    storeAddress(addressInput.value.trim());
+    addressForm.hidden = true;
+    addressInput.value = "";
+    for (const update of revealUpdaters) update();
+    setStatus(`Adres bewaard. Libraries openen nu in een nieuw tabblad.`, "ok");
+  });
 
   function componentUrl(libraryId, componentId) {
     const url = `${penpotAddress.origin}/#/workspace?team-id=${encodeURIComponent(penpotAddress.team)}` +
@@ -488,11 +589,13 @@
     selectLabel.textContent = "Koppel aan";
 
     // A name in a dropdown says little. In this file the canvas jumps to the
-    // component itself, variant and all. In another file there is nothing to
-    // jump to, so it becomes a link to that library.
+    // component itself, variant and all. In another file it is a link that
+    // opens that library on the component, the way the assets panel does.
     const reveal = document.createElement("a");
-    reveal.className = "icon reveal";
+    reveal.className = "go";
+    const revealText = document.createElement("span");
     reveal.innerHTML = REVEAL_ICON;
+    reveal.append(revealText);
 
     const pickedMatch = () => item.matches.find(match => match.key === select.value) || null;
 
@@ -506,26 +609,31 @@
 
     function updateReveal() {
       const match = pickedMatch();
-      reveal.classList.toggle("off", !match || (!match.isLocal && !penpotAddress));
+      reveal.hidden = !match;
       reveal.removeAttribute("target");
       reveal.removeAttribute("rel");
       reveal.href = "#";
 
-      if (!match) {
-        reveal.title = "Kies eerst een component";
-      } else if (match.isLocal) {
-        reveal.title = "Ga naar dit component";
+      if (!match) return;
+
+      if (match.isLocal) {
+        revealText.textContent = "Ga naar component";
+        reveal.title = "Selecteer het hoofdcomponent op de canvas";
       } else if (penpotAddress) {
         reveal.href = componentUrl(match.libraryId, pickedComponentId(match));
         reveal.target = "_blank";
         reveal.rel = "noopener";
-        reveal.title = `Open dit component in ${match.libraryName}`;
+        revealText.textContent = "Bekijk origineel";
+        reveal.title = `Open dit component in ${match.libraryName}, in een nieuw tabblad`;
       } else {
+        revealText.textContent = "Bekijk origineel";
         reveal.title = `${match.libraryName} is een ander bestand`;
       }
 
-      reveal.setAttribute("aria-label", reveal.title);
+      reveal.setAttribute("aria-label", reveal.title + " (" + revealText.textContent + ")");
     }
+
+    revealUpdaters.push(updateReveal);
 
     reveal.addEventListener("click", event => {
       const match = pickedMatch();
@@ -543,10 +651,7 @@
 
       if (!penpotAddress) {
         event.preventDefault();
-        setStatus(
-          `"${match.fullName}" staat in ${match.libraryName}, een ander bestand. Het adres van deze Penpot is hier niet bekend, dus openen lukt niet.`,
-          "error",
-        );
+        askForAddress();
         return;
       }
 
@@ -555,8 +660,12 @@
     });
 
     updateReveal();
-    choice.append(selectLabel, select, reveal);
-    row.append(choice, variantBox);
+    choice.append(selectLabel, select);
+
+    const goRow = document.createElement("div");
+    goRow.className = "go-row";
+    goRow.append(reveal);
+    row.append(choice, variantBox, goRow);
     renderVariantPicker();
     // After the variant picker, which decides which component the link opens.
     updateReveal();
@@ -585,7 +694,9 @@
       ["Libraries", `${diagnostics.libraries} met ${plural(diagnostics.components, "component", "componenten")}`],
     ];
 
-    if (!penpotAddress) rows.push(["Andere library openen", "adres van deze Penpot onbekend"]);
+    rows.push(["Andere library openen", penpotAddress
+      ? penpotAddress.origin
+      : "adres van deze Penpot nog onbekend"]);
 
     const errors = diagnostics.errors || [];
     if (diagnostics.copyInstances === 0 || errors.length) {
@@ -632,6 +743,7 @@
   function render(scan) {
     lastScan = scan;
     choices.clear();
+    revealUpdaters.length = 0;
 
     renderSummary(scan.counts);
 
@@ -757,7 +869,11 @@
     switch (message.type) {
       case "hello":
         applyTheme(message.theme);
-        penpotAddress = readPenpotAddress(message.probe && message.probe.href, document.referrer);
+        penpotAddress = readPenpotAddress(
+          readStoredAddress(),
+          message.probe && message.probe.href,
+          document.referrer,
+        );
         describeProbe(message.probe, message.notes);
         // Connected is the normal case. The Scan button says the rest.
         setStatus("");
