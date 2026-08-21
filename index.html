@@ -145,6 +145,8 @@
       transition: color 0.15s ease;
     }
     .icon:hover:not(:disabled) { color: var(--fg); opacity: 1; }
+    a.icon { display: inline-flex; text-decoration: none; }
+    a.icon.off { opacity: 0.5; cursor: not-allowed; }
     .info[aria-expanded="true"] { color: var(--accent); }
 
     .details { display: grid; gap: 4px; }
@@ -269,6 +271,35 @@
 
   function applyTheme(theme) {
     document.documentElement.dataset.theme = theme === "dark" ? "dark" : "light";
+  }
+
+  // Penpot's own assets panel opens a shared library by navigating the app to
+  // that file. The Plugin API has no call for it, but the address is just a
+  // URL: same origin, same team, other file id. The team id is not in the API,
+  // so it is read off whatever URL we are allowed to see.
+  let penpotAddress = null;
+
+  function readPenpotAddress(...candidates) {
+    for (const candidate of candidates) {
+      if (!candidate) continue;
+      try {
+        const url = new URL(candidate, window.location.href);
+        if (url.protocol !== "http:" && url.protocol !== "https:") continue;
+
+        const hash = url.hash || "";
+        const query = hash.includes("?") ? hash.slice(hash.indexOf("?") + 1) : url.search.slice(1);
+        const team = new URLSearchParams(query).get("team-id");
+        if (team) return { origin: url.origin, team };
+      } catch (e) {
+        // not a usable URL, try the next one
+      }
+    }
+    return null;
+  }
+
+  function libraryUrl(libraryId) {
+    return `${penpotAddress.origin}/#/workspace?team-id=${encodeURIComponent(penpotAddress.team)}` +
+      `&file-id=${encodeURIComponent(libraryId)}`;
   }
 
   function label(match) {
@@ -440,7 +471,7 @@
     select.addEventListener("change", () => {
       if (select.value) choices.set(item.id, select.value);
       else choices.delete(item.id);
-      reveal.disabled = !select.value;
+      updateReveal();
       renderVariantPicker();
       updateActions();
     });
@@ -450,20 +481,66 @@
     selectLabel.htmlFor = select.id;
     selectLabel.textContent = "Koppel aan";
 
-    // A name in a dropdown says little. This jumps the canvas to the component
-    // itself, variant and all, so the choice can be made by looking at it.
-    const reveal = document.createElement("button");
-    reveal.type = "button";
+    // A name in a dropdown says little. In this file the canvas jumps to the
+    // component itself, variant and all. In another file there is nothing to
+    // jump to, so it becomes a link to that library.
+    const reveal = document.createElement("a");
     reveal.className = "icon reveal";
-    reveal.title = "Ga naar dit component";
-    reveal.setAttribute("aria-label", "Ga naar dit component");
     reveal.innerHTML = REVEAL_ICON;
-    reveal.disabled = !select.value;
-    reveal.addEventListener("click", () => {
-      const key = choices.get(item.id) || select.value;
-      if (key) send({ type: "reveal", key });
+
+    const pickedMatch = () => item.matches.find(match => match.key === select.value) || null;
+
+    function updateReveal() {
+      const match = pickedMatch();
+      reveal.classList.toggle("off", !match || (!match.isLocal && !penpotAddress));
+      reveal.removeAttribute("target");
+      reveal.removeAttribute("rel");
+      reveal.href = "#";
+
+      if (!match) {
+        reveal.title = "Kies eerst een component";
+      } else if (match.isLocal) {
+        reveal.title = "Ga naar dit component";
+      } else if (penpotAddress) {
+        reveal.href = libraryUrl(match.libraryId);
+        reveal.target = "_blank";
+        reveal.rel = "noopener";
+        reveal.title = `Open ${match.libraryName} in een nieuw tabblad`;
+      } else {
+        reveal.title = `${match.libraryName} is een ander bestand`;
+      }
+
+      reveal.setAttribute("aria-label", reveal.title);
+    }
+
+    reveal.addEventListener("click", event => {
+      const match = pickedMatch();
+
+      if (!match) {
+        event.preventDefault();
+        return;
+      }
+
+      if (match.isLocal) {
+        event.preventDefault();
+        send({ type: "reveal", key: choices.get(item.id) || select.value });
+        return;
+      }
+
+      if (!penpotAddress) {
+        event.preventDefault();
+        setStatus(
+          `"${match.fullName}" staat in ${match.libraryName}, een ander bestand. Het adres van deze Penpot is hier niet bekend, dus openen lukt niet.`,
+          "error",
+        );
+        return;
+      }
+
+      // A real link with a real href. Penpot opens it in a new tab itself.
+      setStatus(`${match.libraryName} wordt in een nieuw tabblad geopend.`);
     });
 
+    updateReveal();
     choice.append(selectLabel, select, reveal);
     row.append(choice, variantBox);
     renderVariantPicker();
@@ -491,6 +568,8 @@
       ["Component-copies", String(diagnostics.copyInstances)],
       ["Libraries", `${diagnostics.libraries} met ${plural(diagnostics.components, "component", "componenten")}`],
     ];
+
+    if (!penpotAddress) rows.push(["Andere library openen", "adres van deze Penpot onbekend"]);
 
     const errors = diagnostics.errors || [];
     if (diagnostics.copyInstances === 0 || errors.length) {
@@ -641,6 +720,7 @@
       ["Lokale componenten", String(probe.localComponents)],
       ["Verbonden libraries", String(probe.connectedLibraries)],
     ];
+    rows.push(["Andere library openen", penpotAddress ? "kan, " + penpotAddress.origin : "adres van deze Penpot onbekend"]);
     if (notes && notes.length) rows.push(["Fouten", notes.join(" | ")]);
 
     diagnosticsList.innerHTML = "";
@@ -661,6 +741,7 @@
     switch (message.type) {
       case "hello":
         applyTheme(message.theme);
+        penpotAddress = readPenpotAddress(message.probe && message.probe.href, document.referrer);
         describeProbe(message.probe, message.notes);
         // Connected is the normal case. The Scan button says the rest.
         setStatus("");

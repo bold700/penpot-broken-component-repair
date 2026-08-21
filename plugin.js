@@ -793,6 +793,10 @@ try {
 /** Tells the UI the sandbox is alive and what this Penpot can do. */
 function hello() {
   const probe = {
+    // The URL of the page the plugin is running in, when the sandbox is allowed
+    // to see it. It carries the team id, which is the one thing needed to build
+    // a link to another file and which the API does not expose anywhere.
+    href: safeRead(() => String(globalThis.location.href)) || '',
     currentPage: !!penpot.currentPage,
     currentFile: !!penpot.currentFile,
     pages: 0,
